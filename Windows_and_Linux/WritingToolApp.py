@@ -7,6 +7,9 @@ import sys
 import threading
 import time
 
+import ctypes
+from ctypes import wintypes
+
 import darkdetect
 import pyperclip
 import ui.AboutWindow
@@ -15,14 +18,23 @@ import ui.OnboardingWindow
 import ui.ResponseWindow
 import ui.SettingsWindow
 from aiprovider import GeminiProvider, OllamaProvider, OpenAICompatibleProvider, obfuscate_api_key
+from local_speech import LocalSpeechService
 from pynput import keyboard as pykeyboard
 from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import QLocale, Signal, Slot
 from PySide6.QtGui import QCursor, QGuiApplication
 from PySide6.QtWidgets import QApplication, QMessageBox
 from update_checker import UpdateChecker
+from version import APP_DISPLAY_NAME, APP_VERSION
 
 _ = gettext.gettext
+
+READ_ALOUD_OPTION = {
+    "action": "read_aloud",
+    "icon": "builtin:speaker",
+    "open_in_window": False,
+    "visible": True,
+}
 
 
 class _SelectedTextHolder:
@@ -31,11 +43,43 @@ class _SelectedTextHolder:
     `process_option_thread`. The capture thread sets `text` and signals
     `ready` once done.
     """
-    __slots__ = ("text", "ready")
+    __slots__ = (
+        "text",
+        "ready",
+        "capture_started",
+        "capture_finished",
+        "capture_retries",
+    )
 
     def __init__(self):
         self.text = ""
         self.ready = threading.Event()
+        self.capture_started = time.perf_counter()
+        self.capture_finished = None
+        self.capture_retries = 0
+
+
+class _WindowsHotkeyFilter(QtCore.QAbstractNativeEventFilter):
+    """Dispatch WM_HOTKEY messages registered on the Qt GUI thread."""
+
+    WM_HOTKEY = 0x0312
+
+    def __init__(self, callbacks):
+        super().__init__()
+        self.callbacks = callbacks
+
+    def nativeEventFilter(self, event_type, message):
+        try:
+            if event_type in (b'windows_generic_MSG', b'windows_dispatcher_MSG'):
+                msg = wintypes.MSG.from_address(int(message))
+                if msg.message == self.WM_HOTKEY:
+                    callback = self.callbacks.get(int(msg.wParam))
+                    if callback:
+                        callback()
+                        return True, 0
+        except Exception:
+            logging.error('Failed to dispatch native hotkey', exc_info=True)
+        return False, 0
 
 
 class WritingToolApp(QtWidgets.QApplication):
@@ -46,15 +90,22 @@ class WritingToolApp(QtWidgets.QApplication):
     show_message_signal = Signal(str, str)  # a signal for showing message boxes
     hotkey_triggered_signal = Signal()
     followup_response_signal = Signal(str)
+    speech_status_signal = Signal(str)
+    speech_error_signal = Signal(str)
 
 
     def __init__(self, argv):
         super().__init__(argv)
+        self.setApplicationName("Writing Tools")
+        self.setApplicationDisplayName(APP_DISPLAY_NAME)
+        self.setApplicationVersion(APP_VERSION)
         self.current_response_window = None
         logging.debug('Initializing WritingToolApp')
         self.output_ready_signal.connect(self.replace_text)
         self.show_message_signal.connect(self.show_message_box)
         self.hotkey_triggered_signal.connect(self.on_hotkey_pressed)
+        self.speech_status_signal.connect(self.show_speech_status)
+        self.speech_error_signal.connect(self.show_speech_error)
         self.config = None
         self.config_path = None
         self.load_config()
@@ -75,8 +126,18 @@ class WritingToolApp(QtWidgets.QApplication):
         self.output_queue = ""
         self.last_replace = 0
         self.hotkey_listener = None
+        self._native_hotkey_filter = None
+        self._native_hotkey_callbacks = {}
+        self._native_hotkey_ids = []
+        self._speech_cancel_hotkey_id = 0x5753
+        self._speech_cancel_hotkey_registered = False
+        # The window that had the selected text before Writing Tools opened.
+        # It is restored before a reviewed response is inserted.
+        self.target_window_handle = None
         self.paused = False
         self.toggle_action = None
+        self.local_speech = LocalSpeechService()
+        self.speech_progress_dialog = None
 
         # Holder for the user's selected text. Populated asynchronously by a
         # background thread so the popup can show instantly — see `_show_popup`
@@ -127,6 +188,17 @@ class WritingToolApp(QtWidgets.QApplication):
         self.recent_triggers = []  # Track recent hotkey triggers
         self.TRIGGER_WINDOW = 1.5  # Time window in seconds
         self.MAX_TRIGGERS = 3  # Max allowed triggers in window
+
+        # Load the cached Sarah model after startup so the first Read Aloud
+        # click does not pay the model/session initialization cost.
+        QtCore.QTimer.singleShot(2000, self._start_speech_warmup)
+
+    @Slot()
+    def _start_speech_warmup(self):
+        threading.Thread(
+            target=self.local_speech.warm_up_english,
+            daemon=True,
+        ).start()
 
     def setup_translations(self, lang=None):
         if not lang:
@@ -321,9 +393,25 @@ class WritingToolApp(QtWidgets.QApplication):
             with open(self.options_path, 'r') as f:
                 self.options = json.load(f)
                 logging.debug('Options loaded successfully')
+            if "Read Aloud" not in self.options:
+                self.options["Read Aloud"] = dict(READ_ALOUD_OPTION)
+                with open(self.options_path, 'w') as f:
+                    json.dump(self.options, f, indent=2)
+                logging.info('Added the built-in Read Aloud action to options.json')
         else:
             logging.debug('Options file not found')
             self.options = None
+
+    def save_options(self, options):
+        """
+        Save the options file.
+        """
+        if not self.options_path:
+            self.options_path = os.path.join(os.path.dirname(sys.argv[0]), 'options.json')
+        with open(self.options_path, 'w') as f:
+            json.dump(options, f, indent=2)
+        self.options = options
+        logging.debug('Options saved successfully')
 
     def save_config(self, config):
         """
@@ -367,6 +455,10 @@ class WritingToolApp(QtWidgets.QApplication):
         later one is logged and skipped — the listener can't dispatch to
         two callbacks for the same combination anyway.
         """
+        if sys.platform.startswith('win'):
+            self._start_windows_hotkey_listener()
+            return
+
         try:
             if self.hotkey_listener is not None:
                 self.hotkey_listener.stop()
@@ -430,6 +522,159 @@ class WritingToolApp(QtWidgets.QApplication):
         except Exception as e:
             logging.error(f'Failed to register hotkey listener: {e}')
 
+    @staticmethod
+    def _parse_windows_hotkey(hotkey_str):
+        """Convert a user shortcut into RegisterHotKey modifiers and key."""
+        modifier_values = {
+            'alt': 0x0001,
+            'ctrl': 0x0002,
+            'control': 0x0002,
+            'shift': 0x0004,
+        }
+        named_keys = {
+            'backspace': 0x08,
+            'tab': 0x09,
+            'enter': 0x0D,
+            'return': 0x0D,
+            'escape': 0x1B,
+            'esc': 0x1B,
+            'space': 0x20,
+            'delete': 0x2E,
+        }
+
+        modifiers = 0x4000  # MOD_NOREPEAT
+        key_code = None
+        for raw_token in hotkey_str.lower().split('+'):
+            token = raw_token.strip('<> ')
+            if token in modifier_values:
+                modifiers |= modifier_values[token]
+            elif token in named_keys:
+                if key_code is not None:
+                    raise ValueError('A hotkey can contain only one non-modifier key')
+                key_code = named_keys[token]
+            elif len(token) == 1 and token.isalnum():
+                if key_code is not None:
+                    raise ValueError('A hotkey can contain only one non-modifier key')
+                key_code = ord(token.upper())
+            elif token.startswith('f') and token[1:].isdigit() and 1 <= int(token[1:]) <= 24:
+                if key_code is not None:
+                    raise ValueError('A hotkey can contain only one non-modifier key')
+                key_code = 0x70 + int(token[1:]) - 1
+            else:
+                raise ValueError(f'Unsupported Windows hotkey key: {token}')
+
+        if key_code is None:
+            raise ValueError('The hotkey needs a non-modifier key')
+        return modifiers, key_code
+
+    def _stop_windows_hotkeys(self):
+        """Unregister native hotkeys owned by the Qt GUI thread."""
+        if not sys.platform.startswith('win'):
+            return
+        for hotkey_id in self._native_hotkey_ids:
+            ctypes.windll.user32.UnregisterHotKey(None, hotkey_id)
+        self._native_hotkey_ids.clear()
+        self._native_hotkey_callbacks.clear()
+        self._speech_cancel_hotkey_registered = False
+
+    def _enable_speech_cancel_hotkey(self):
+        """Capture bare Escape only while Read Aloud is active."""
+        if not sys.platform.startswith('win') or self._speech_cancel_hotkey_registered:
+            return
+        hotkey_id = self._speech_cancel_hotkey_id
+        # MOD_NOREPEAT + VK_ESCAPE. RegisterHotKey consumes Escape only for
+        # the short interval in which speech is preparing or playing.
+        if ctypes.windll.user32.RegisterHotKey(None, hotkey_id, 0x4000, 0x1B):
+            self._native_hotkey_callbacks[hotkey_id] = self.cancel_read_aloud
+            self._native_hotkey_ids.append(hotkey_id)
+            self._speech_cancel_hotkey_registered = True
+            logging.debug('Registered Escape to stop Read Aloud')
+        else:
+            logging.warning('Could not register Escape to stop Read Aloud')
+
+    def _disable_speech_cancel_hotkey(self):
+        if not self._speech_cancel_hotkey_registered:
+            return
+        hotkey_id = self._speech_cancel_hotkey_id
+        ctypes.windll.user32.UnregisterHotKey(None, hotkey_id)
+        self._native_hotkey_callbacks.pop(hotkey_id, None)
+        if hotkey_id in self._native_hotkey_ids:
+            self._native_hotkey_ids.remove(hotkey_id)
+        self._speech_cancel_hotkey_registered = False
+        logging.debug('Released Read Aloud Escape hotkey')
+
+    @Slot()
+    def cancel_read_aloud(self):
+        """Stop pending synthesis/playback and reset its visible UI."""
+        logging.info('Read Aloud canceled with Escape')
+        self.local_speech.stop()
+        self._close_speech_progress()
+        self._disable_speech_cancel_hotkey()
+        if self.tray_icon:
+            self.tray_icon.showMessage(
+                'Read Aloud',
+                'Stopped.',
+                QtWidgets.QSystemTrayIcon.MessageIcon.Information,
+                2000,
+            )
+
+    def _start_windows_hotkey_listener(self):
+        """Register persistent global shortcuts through the Windows API."""
+        self._stop_windows_hotkeys()
+
+        if self._native_hotkey_filter is None:
+            self._native_hotkey_filter = _WindowsHotkeyFilter(
+                self._native_hotkey_callbacks
+            )
+            self.installNativeEventFilter(self._native_hotkey_filter)
+
+        bindings = []
+        orig_shortcut = self.config.get('shortcut', 'ctrl+space')
+        self.registered_hotkey = orig_shortcut
+
+        def on_global_activate():
+            if self.paused:
+                return
+            logging.debug('Triggered native global hotkey')
+            self.hotkey_triggered_signal.emit()
+
+        bindings.append((orig_shortcut, on_global_activate, 'Writing Tools'))
+        if self.options:
+            for button_name, button_cfg in self.options.items():
+                if button_name == 'Custom':
+                    continue
+                raw = (button_cfg.get('hotkey') or '').strip()
+                if raw:
+                    bindings.append(
+                        (raw, self._make_button_hotkey_callback(button_name), button_name)
+                    )
+
+        registered_combinations = set()
+        next_id = 0x5754
+        for shortcut, callback, label in bindings:
+            try:
+                modifiers, key_code = self._parse_windows_hotkey(shortcut)
+                combination = (modifiers, key_code)
+                if combination in registered_combinations:
+                    logging.warning('Duplicate native hotkey skipped: %s', shortcut)
+                    continue
+                if not ctypes.windll.user32.RegisterHotKey(
+                    None, next_id, modifiers, key_code
+                ):
+                    raise ctypes.WinError()
+                self._native_hotkey_callbacks[next_id] = callback
+                self._native_hotkey_ids.append(next_id)
+                registered_combinations.add(combination)
+                logging.info('Registered native hotkey %s for %s', shortcut, label)
+                next_id += 1
+            except Exception:
+                logging.error(
+                    'Failed to register native hotkey %s for %s',
+                    shortcut,
+                    label,
+                    exc_info=True,
+                )
+
     def _make_button_hotkey_callback(self, button_name):
         """
         Build a callback that fires `button_name` directly, bypassing the
@@ -444,6 +689,7 @@ class WritingToolApp(QtWidgets.QApplication):
             if self.paused:
                 return
             logging.debug(f'Direct hotkey fired for button "{button_name}"')
+            self._remember_target_window()
             # Match the global hotkey's behaviour: cancel any in-flight
             # request so a new fire doesn't pile up on top of a previous one.
             if self.current_provider:
@@ -514,6 +760,8 @@ class WritingToolApp(QtWidgets.QApplication):
             logging.debug("Cancelling current provider's request")
             self.current_provider.cancel()
             self.output_queue = ""
+
+        self._remember_target_window()
 
         # noinspection PyTypeChecker
         QtCore.QMetaObject.invokeMethod(self, "_show_popup", QtCore.Qt.ConnectionType.QueuedConnection)
@@ -595,6 +843,12 @@ class WritingToolApp(QtWidgets.QApplication):
         pressed the hotkey without actually selecting anything, which
         `process_option_thread` reports as a normal error.
         """
+        # GlobalHotKeys fires as soon as every key in the activation chord is
+        # down. Injecting Ctrl+C before the user releases Ctrl+Space can leave
+        # pynput's pressed-key state corrupted, so the shortcut only works
+        # once. Let the physical activation chord fully release first.
+        self._wait_for_hotkey_release()
+
         try:
             clipboard_backup = pyperclip.paste()
         except Exception:
@@ -602,12 +856,34 @@ class WritingToolApp(QtWidgets.QApplication):
 
         self.clear_clipboard()
 
-        kbrd = pykeyboard.Controller()
-        try:
+        def _copy_from_target():
+            # A native global hotkey can briefly change activation while Qt
+            # prepares the popup. Explicitly restore the original window so
+            # Ctrl+C always reaches the selected text rather than the popup.
+            if self.target_window_handle and sys.platform.startswith('win'):
+                try:
+                    ctypes.windll.user32.SetForegroundWindow(
+                        wintypes.HWND(self.target_window_handle)
+                    )
+                except Exception:
+                    logging.debug('Unable to refocus selection source', exc_info=True)
+
+            kbrd = pykeyboard.Controller()
             kbrd.press(pykeyboard.Key.ctrl.value)
             kbrd.press('c')
             kbrd.release('c')
             kbrd.release(pykeyboard.Key.ctrl.value)
+
+        try:
+            _copy_from_target()
+            # Give clipboard-delayed apps a short chance to publish. If the
+            # first injected copy was lost during focus transition, retry once
+            # while the source window is explicitly foregrounded.
+            time.sleep(0.12)
+            if not (pyperclip.paste() or ''):
+                logging.debug('First Ctrl+C capture was empty; retrying once')
+                holder.capture_retries += 1
+                _copy_from_target()
         except Exception as e:
             logging.error(f'Error simulating Ctrl+C: {e}')
 
@@ -634,9 +910,41 @@ class WritingToolApp(QtWidgets.QApplication):
                         pyperclip.copy(clipboard_backup)
                     except Exception as e:
                         logging.error(f'Error restoring clipboard: {e}')
+                    holder.capture_finished = time.perf_counter()
                     holder.ready.set()
 
         threading.Thread(target=_poll_clipboard, daemon=True).start()
+
+    def _wait_for_hotkey_release(self, timeout=0.75):
+        """Wait briefly for the configured activation chord to be released."""
+        if not sys.platform.startswith('win'):
+            return
+
+        virtual_keys = {
+            'ctrl': 0x11,
+            'control': 0x11,
+            'shift': 0x10,
+            'alt': 0x12,
+            'space': 0x20,
+        }
+        shortcut = self.registered_hotkey or self.config.get('shortcut', 'ctrl+space')
+        keys = []
+        for token in shortcut.lower().split('+'):
+            token = token.strip('<> ')
+            if token in virtual_keys:
+                keys.append(virtual_keys[token])
+            elif len(token) == 1:
+                keys.append(ord(token.upper()))
+
+        deadline = time.time() + timeout
+        try:
+            get_key_state = ctypes.windll.user32.GetAsyncKeyState
+            while keys and time.time() < deadline:
+                if not any(get_key_state(key) & 0x8000 for key in keys):
+                    return
+                time.sleep(0.01)
+        except Exception:
+            logging.debug('Unable to wait for hotkey release', exc_info=True)
 
     @staticmethod
     def clear_clipboard():
@@ -656,6 +964,9 @@ class WritingToolApp(QtWidgets.QApplication):
         is never blocked on the clipboard read.
         """
         logging.debug(f'Processing option: {option}')
+
+        if self.options.get(option, {}).get('action') == 'read_aloud':
+            self.show_speech_status('Preparing selected text...')
 
         # Drop any stale ref so a previous run's late-arriving response can't
         # land in a now-irrelevant window. The new window (if any) is created
@@ -702,15 +1013,45 @@ class WritingToolApp(QtWidgets.QApplication):
             logging.warning('Timed out waiting for selected text capture')
         selected_text = (holder.text if holder else '') or ''
 
+        option_config = self.options.get(option, {})
         if not selected_text.strip():
             # The chat-mode fallback that used to fire here was removed when
             # popup show became instant — we no longer have a way to detect
             # "user wants to chat" vs "capture failed", so we pick the safer
             # interpretation and surface the error.
-            self.show_message_signal.emit('Error', 'Please select text to use this option.')
+            if option_config.get('action') == 'read_aloud':
+                self.speech_error_signal.emit('Please select text to use Read Aloud.')
+            else:
+                self.show_message_signal.emit('Error', 'Please select text to use this option.')
             return
 
-        if self.options[option]['open_in_window']:
+        if option_config.get('action') == 'read_aloud':
+            metrics_context = {
+                'capture_retries': holder.capture_retries if holder else 0,
+            }
+            if holder and holder.capture_finished is not None:
+                metrics_context['capture_ms'] = round(
+                    (holder.capture_finished - holder.capture_started) * 1000,
+                    2,
+                )
+            self.local_speech.speak(
+                selected_text,
+                status_callback=self.speech_status_signal.emit,
+                error_callback=self.speech_error_signal.emit,
+                metrics_context=metrics_context,
+            )
+            return
+
+        # Review mode is on by default. It keeps the generated text out of
+        # the target app until the user explicitly clicks "Insert at cursor"
+        # in the result window. Individual window-mode actions still open a
+        # window even when the global review setting is disabled.
+        show_in_window = (
+            self.options[option].get('open_in_window', False)
+            or self.config.get('review_before_insert', True)
+        )
+
+        if show_in_window:
             QtCore.QMetaObject.invokeMethod(
                 self,
                 '_setup_response_window',
@@ -732,7 +1073,7 @@ class WritingToolApp(QtWidgets.QApplication):
 
             logging.debug(f'Getting response from provider for option: {option}')
 
-            if self.options[option]['open_in_window']:
+            if show_in_window:
                 logging.debug('Getting response for window display')
                 response = self.current_provider.get_response(system_instruction, prompt, return_response=True)
                 logging.debug(f'Got response of length: {len(response) if response else 0}')
@@ -765,6 +1106,57 @@ class WritingToolApp(QtWidgets.QApplication):
         Show a message box with the given title and message.
         """
         QMessageBox.warning(None, title, message)
+
+    @Slot(str)
+    def show_speech_status(self, message):
+        """Show visible progress until speech playback actually begins."""
+        if message == 'Read Aloud finished.':
+            self._close_speech_progress()
+            self._disable_speech_cancel_hotkey()
+        elif message.startswith('Reading selected text with'):
+            self._close_speech_progress()
+        else:
+            self._enable_speech_cancel_hotkey()
+            if self.speech_progress_dialog is None:
+                dialog = QtWidgets.QProgressDialog('', '', 0, 0)
+                dialog.setWindowTitle('Read Aloud')
+                dialog.setCancelButton(None)
+                dialog.setWindowModality(QtCore.Qt.WindowModality.NonModal)
+                dialog.setMinimumWidth(340)
+                dialog.setAutoClose(False)
+                dialog.setAutoReset(False)
+                dialog.setWindowFlags(
+                    QtCore.Qt.WindowType.Tool
+                    | QtCore.Qt.WindowType.WindowStaysOnTopHint
+                    | QtCore.Qt.WindowType.WindowDoesNotAcceptFocus
+                )
+                dialog.setAttribute(QtCore.Qt.WidgetAttribute.WA_ShowWithoutActivating)
+                self.speech_progress_dialog = dialog
+            self.speech_progress_dialog.setLabelText(
+                f'{message}\n\nPress Esc to stop.'
+            )
+            self.speech_progress_dialog.show()
+
+        if self.tray_icon:
+            self.tray_icon.showMessage(
+                'Read Aloud',
+                message,
+                QtWidgets.QSystemTrayIcon.MessageIcon.Information,
+                4000,
+            )
+
+    @Slot(str)
+    def show_speech_error(self, message):
+        """Close speech progress and show the actionable failure."""
+        self._close_speech_progress()
+        self._disable_speech_cancel_hotkey()
+        self.show_message_signal.emit('Read Aloud Error', message)
+
+    def _close_speech_progress(self):
+        if self.speech_progress_dialog is not None:
+            self.speech_progress_dialog.close()
+            self.speech_progress_dialog.deleteLater()
+            self.speech_progress_dialog = None
 
     def show_response_window(self, option, text):
         """
@@ -835,6 +1227,70 @@ class WritingToolApp(QtWidgets.QApplication):
         else:
             logging.debug('No new text to process')
 
+    def insert_text_at_cursor(self, text, response_window=None):
+        """Paste a completed window response into the previously focused app."""
+        if not text or not isinstance(text, str):
+            return
+
+        # Closing the result window returns focus to the app/input where the
+        # user invoked Writing Tools. Delay the paste very slightly so Windows
+        # completes that focus change first.
+        if response_window:
+            response_window.close()
+        QtCore.QTimer.singleShot(150, lambda: self._restore_target_and_paste(text))
+
+    def _remember_target_window(self):
+        """Remember the foreground window before Writing Tools takes focus."""
+        if not sys.platform.startswith('win'):
+            return
+        try:
+            hwnd = ctypes.windll.user32.GetForegroundWindow()
+            if hwnd:
+                self.target_window_handle = hwnd
+                logging.debug(f'Remembered target window handle: {hwnd}')
+        except Exception as e:
+            logging.error(f'Could not remember target window: {e}')
+
+    def _restore_target_and_paste(self, text):
+        """Return focus to the original app, then paste into its selection."""
+        hwnd = self.target_window_handle
+        if sys.platform.startswith('win') and hwnd:
+            try:
+                user32 = ctypes.windll.user32
+                if user32.IsWindow(hwnd):
+                    # SW_RESTORE also changes a maximized window back to its
+                    # smaller restored bounds. Use it only for a genuinely
+                    # minimized target so insertion preserves maximized state.
+                    if user32.IsIconic(hwnd):
+                        user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+                    focused = user32.SetForegroundWindow(hwnd)
+                    logging.debug(f'Restored target window {hwnd}: {bool(focused)}')
+            except Exception as e:
+                logging.error(f'Could not restore target window: {e}')
+
+        # Windows applies foreground changes asynchronously. Waiting one
+        # short UI tick means Ctrl+V is delivered to the original input box,
+        # rather than to Writing Tools' just-closed result window.
+        QtCore.QTimer.singleShot(120, lambda: self._paste_text_at_cursor(text))
+
+    @staticmethod
+    def _paste_text_at_cursor(text):
+        """Paste text while preserving the user's clipboard contents."""
+        try:
+            clipboard_backup = pyperclip.paste()
+            pyperclip.copy(text.rstrip('\n'))
+
+            keyboard = pykeyboard.Controller()
+            keyboard.press(pykeyboard.Key.ctrl.value)
+            keyboard.press('v')
+            keyboard.release('v')
+            keyboard.release(pykeyboard.Key.ctrl.value)
+
+            time.sleep(0.2)
+            pyperclip.copy(clipboard_backup)
+        except Exception as e:
+            logging.error(f'Error inserting text at cursor: {e}')
+
     def create_tray_icon(self):
         """
         Create the system tray icon for the application.
@@ -852,7 +1308,7 @@ class WritingToolApp(QtWidgets.QApplication):
         else:
             self.tray_icon = QtWidgets.QSystemTrayIcon(QtGui.QIcon(icon_path), self)
         # Set the tooltip (hover name) for the tray icon
-        self.tray_icon.setToolTip("WritingTools")
+        self.tray_icon.setToolTip(APP_DISPLAY_NAME)
         self.tray_menu = QtWidgets.QMenu()
         self.tray_icon.setContextMenu(self.tray_menu)
 
@@ -877,6 +1333,9 @@ class WritingToolApp(QtWidgets.QApplication):
         # Pause/Resume toggle action 
         self.toggle_action = self.tray_menu.addAction(self._('Resume') if self.paused else self._('Pause'))
         self.toggle_action.triggered.connect(self.toggle_paused)
+
+        stop_speech_action = self.tray_menu.addAction(self._('Stop Read Aloud'))
+        stop_speech_action.triggered.connect(self.local_speech.stop)
 
         # About menu item
         about_action = self.tray_menu.addAction(self._('About'))
@@ -1100,6 +1559,9 @@ class WritingToolApp(QtWidgets.QApplication):
         Exit the application.
         """
         logging.debug('Stopping the listener')
+        self._close_speech_progress()
+        self.local_speech.stop()
+        self._stop_windows_hotkeys()
         if self.hotkey_listener is not None:
             self.hotkey_listener.stop()
         logging.debug('Exiting application')

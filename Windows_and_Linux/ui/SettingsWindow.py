@@ -7,6 +7,7 @@ from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QHBoxLayout, QRadioButton, QScrollArea
 
 from ui.AutostartManager import AutostartManager
+from ui.CustomPopupWindow import PopupButtonVisibilityDialog
 from ui.UIUtils import UIUtils, colorMode
 
 _ = lambda x: x
@@ -29,6 +30,8 @@ class SettingsWindow(QtWidgets.QWidget):
         self.provider_container = None
         self.autostart_checkbox = None
         self.shortcut_input = None
+        self.review_before_insert_checkbox = None
+        self.option_prompt_inputs = {}
         self.init_ui()
         self.retranslate_ui()
 
@@ -234,6 +237,106 @@ class SettingsWindow(QtWidgets.QWidget):
             """)
             content_layout.addWidget(self.shortcut_input)
 
+            button_visibility_button = QtWidgets.QPushButton(
+                "Choose Ctrl+Space Buttons..."
+            )
+            button_visibility_button.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {'#444' if colorMode == 'dark' else '#f0f0f0'};
+                    color: {'#ffffff' if colorMode == 'dark' else '#000000'};
+                    border: 1px solid {'#666' if colorMode == 'dark' else '#ccc'};
+                    border-radius: 5px;
+                    padding: 8px;
+                    font-size: 14px;
+                }}
+                QPushButton:hover {{
+                    background-color: {'#555' if colorMode == 'dark' else '#e0e0e0'};
+                }}
+            """)
+            button_visibility_button.clicked.connect(self.show_button_visibility_dialog)
+            content_layout.addWidget(button_visibility_button)
+
+            self.review_before_insert_checkbox = QtWidgets.QCheckBox(
+                "Review results before inserting"
+            )
+            self.review_before_insert_checkbox.setToolTip(
+                "Show every result in a window. Use Insert at cursor only after reviewing it."
+            )
+            self.review_before_insert_checkbox.setChecked(
+                self.app.config.get('review_before_insert', True)
+            )
+            self.review_before_insert_checkbox.setStyleSheet(
+                f"font-size: 16px; color: {'#ffffff' if colorMode == 'dark' else '#333333'};"
+            )
+            content_layout.addWidget(self.review_before_insert_checkbox)
+
+            # Add editable AI prompt section for every non-audio button.
+            ai_prompt_label = QtWidgets.QLabel(_("AI Button Prompts"))
+            ai_prompt_label.setStyleSheet(
+                f"font-size: 18px; font-weight: bold; color: {'#ffffff' if colorMode == 'dark' else '#333333'};"
+            )
+            content_layout.addWidget(ai_prompt_label)
+            prompt_intro = QtWidgets.QLabel(
+                _("Edit the prefix and system instruction for each button below. "
+                  "These are sent to your selected AI provider with the highlighted text.")
+            )
+            prompt_intro.setStyleSheet(
+                f"font-size: 14px; color: {'#cccccc' if colorMode == 'dark' else '#555555'};"
+            )
+            prompt_intro.setWordWrap(True)
+            content_layout.addWidget(prompt_intro)
+
+            for option_name, option_config in (self.app.options or {}).items():
+                if option_config.get("action") == "read_aloud":
+                    continue
+                if "instruction" not in option_config and "prefix" not in option_config:
+                    continue
+
+                section = QtWidgets.QFrame()
+                section.setStyleSheet(
+                    f"border: 1px solid {'#444' if colorMode == 'dark' else '#ccc'}; "
+                    "border-radius: 8px; padding: 8px;"
+                )
+                section_layout = QtWidgets.QVBoxLayout(section)
+                section_layout.setSpacing(8)
+
+                section_title = QtWidgets.QLabel(option_name)
+                section_title.setStyleSheet(
+                    f"font-size: 16px; font-weight: bold; color: {'#ffffff' if colorMode == 'dark' else '#333333'};"
+                )
+                section_layout.addWidget(section_title)
+
+                prefix_label = QtWidgets.QLabel(_("Prefix"))
+                prefix_label.setStyleSheet(
+                    f"font-size: 14px; color: {'#ffffff' if colorMode == 'dark' else '#333333'};"
+                )
+                section_layout.addWidget(prefix_label)
+                prefix_input = QtWidgets.QLineEdit(option_config.get("prefix", ""))
+                prefix_input.setStyleSheet(
+                    f"font-size: 14px; background-color: {'#444' if colorMode == 'dark' else 'white'}; "
+                    f"color: {'#ffffff' if colorMode == 'dark' else '#000000'}; border: 1px solid {'#666' if colorMode == 'dark' else '#ccc'};"
+                )
+                section_layout.addWidget(prefix_input)
+
+                instruction_label = QtWidgets.QLabel(_("System Instruction"))
+                instruction_label.setStyleSheet(
+                    f"font-size: 14px; color: {'#ffffff' if colorMode == 'dark' else '#333333'};"
+                )
+                section_layout.addWidget(instruction_label)
+                instruction_input = QtWidgets.QPlainTextEdit(option_config.get("instruction", ""))
+                instruction_input.setStyleSheet(
+                    f"font-size: 14px; background-color: {'#333' if colorMode == 'dark' else 'white'}; "
+                    f"color: {'#ffffff' if colorMode == 'dark' else '#000000'}; border: 1px solid {'#666' if colorMode == 'dark' else '#ccc'};"
+                )
+                instruction_input.setMinimumHeight(120)
+                section_layout.addWidget(instruction_input)
+
+                self.option_prompt_inputs[option_name] = {
+                    "prefix": prefix_input,
+                    "instruction": instruction_input,
+                }
+                content_layout.addWidget(section)
+
             # Add theme selection
             theme_label = QtWidgets.QLabel(_("Background Theme:"))
             theme_label.setStyleSheet(f"font-size: 16px; color: {'#ffffff' if colorMode == 'dark' else '#333333'};")
@@ -349,13 +452,29 @@ class SettingsWindow(QtWidgets.QWidget):
         """Toggle the autostart setting."""
         AutostartManager.set_autostart(state == 2)
 
+    def show_button_visibility_dialog(self):
+        PopupButtonVisibilityDialog(self.app, self).exec_()
+
     def save_settings(self):
         """Save the current settings."""
+        if not self.providers_only:
+            options = self.app.options.copy() if self.app.options else {}
+            for option_name, editors in self.option_prompt_inputs.items():
+                if option_name not in options:
+                    continue
+                option_config = options[option_name]
+                if option_config.get("action") == "read_aloud":
+                    continue
+                option_config["prefix"] = editors["prefix"].text()
+                option_config["instruction"] = editors["instruction"].toPlainText()
+            self.app.save_options(options)
+
         self.app.config['locale'] = 'en'
 
         if not self.providers_only:
             self.app.config['shortcut'] = self.shortcut_input.text()
             self.app.config['theme'] = 'gradient' if self.gradient_radio.isChecked() else 'plain'
+            self.app.config['review_before_insert'] = self.review_before_insert_checkbox.isChecked()
         else:
             self.app.create_tray_icon()
 
