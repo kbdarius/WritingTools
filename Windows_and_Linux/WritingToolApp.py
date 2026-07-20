@@ -1163,15 +1163,21 @@ class WritingToolApp(QtWidgets.QApplication):
     @Slot(str)
     def show_speech_error(self, message):
         """Close speech progress and show the actionable failure."""
+        logging.error('Read Aloud error: %s', message)
         self._close_speech_progress()
         self._disable_speech_cancel_hotkey()
         self.show_message_signal.emit('Read Aloud Error', message)
 
     def _close_speech_progress(self):
         if self.speech_progress_dialog is not None:
-            self.speech_progress_dialog.close()
-            self.speech_progress_dialog.deleteLater()
+            dialog = self.speech_progress_dialog
             self.speech_progress_dialog = None
+            # Closing a QProgressDialog emits canceled(). Block that signal so
+            # normal completion and error cleanup are not logged as if the
+            # user pressed Escape or clicked Stop.
+            dialog.blockSignals(True)
+            dialog.close()
+            dialog.deleteLater()
 
     def show_response_window(self, option, text):
         """
