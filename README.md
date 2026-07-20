@@ -220,7 +220,7 @@ These instructions are for any Writing Tools version, using the OpenAI-Compatibl
 
 ## 👨‍💻 To Compile the Application Yourself:
 
-[Instructions here!](https://github.com/theJayTea/WritingTools/blob/8713e5a5de63a7892b05a43b9753172e692768fb/README's%20Linked%20Content/To%20Compile%20the%20Application%20Yourself.md)
+[Instructions here!](README's%20Linked%20Content/To%20Compile%20the%20Application%20Yourself.md)
 
 ## 🌟 Contributors
 

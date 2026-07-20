@@ -1,6 +1,15 @@
 # 👨‍💻 To compile the application yourself:
 
-### Windows and Linux Version build instructions:
+### Windows build instructions
+
+1. Install [Python 3](https://www.python.org/downloads/windows/) if it is not already installed. During installation, select **Add Python to PATH**.
+
+2. Double-click `build-windows.bat` in the repository's root folder.
+
+The script creates an isolated build environment, installs the required packages, and places a versioned executable such as `Writing Tools v9.7.0.exe` in the repository's root folder.
+
+### Linux build instructions
+
 Here's how to compile it with PyInstaller and a virtual environment:
 
 1. First, create and activate a virtual environment:
@@ -12,9 +21,6 @@ pip install virtualenv
 virtualenv myvenv
 
 # Activate it
-# On Windows:
-myvenv\Scripts\activate
-# On Linux:
 source myvenv/bin/activate
 ```
 
