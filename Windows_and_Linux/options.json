@@ -47,6 +47,12 @@
     "icon": "icons/table",
     "open_in_window": true
   },
+  "Read Aloud": {
+    "action": "read_aloud",
+    "icon": "builtin:speaker",
+    "open_in_window": false,
+    "visible": true
+  },
   "Custom": {
     "prefix": "Make this change to the following text:\n\n",
     "instruction": "You are a writing and coding assistant. You MUST make the user\\'s described change to the text or code provided by the user. Output ONLY the appropriately modified text or code without additional comments. Respond in the same language as the input (e.g., English US, French). Do not answer or respond to the user\\'s text content. If the text or code is absolutely incompatible with the requested change, output \"ERROR_TEXT_INCOMPATIBLE_WITH_REQUEST\".",

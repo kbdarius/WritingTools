@@ -3,6 +3,7 @@ import webbrowser
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from ui.UIUtils import UIUtils, colorMode
+from version import APP_VERSION
 
 _ = lambda x: x
 
@@ -75,7 +76,7 @@ class AboutWindow(QtWidgets.QWidget):
                 'If you have a Mac, be sure to check out the <a href="https://github.com/theJayTea/WritingTools#-macos">Writing Tools macOS port</a> by <a href="https://github.com/Aryamirsepasi">Arya Mirsepasi</a>!<br>' + \
                 """</p>
                 <p style='text-align: center;'>
-                <b>Version:</b> 7.0 (Codename: Impeccably Improved)
+                <b>Version:</b> """ + APP_VERSION + """
                 </p>
                 <p />
                 """

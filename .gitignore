@@ -2,6 +2,15 @@
 
 .DS_Store
 Windows_and_Linux/config.json
+/config.json
+
+# Local build environments and generated Windows artifacts
+/Windows_and_Linux/.build-clean/
+/Windows_and_Linux/.build-venv/
+/Windows_and_Linux/build/
+/Windows_and_Linux/dist/
+/Windows_and_Linux/*.spec
+/Writing Tools v*.exe
 
 .idea
 **/__pycache__

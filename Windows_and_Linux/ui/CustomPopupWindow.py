@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from ui.UIUtils import ThemeBackground, colorMode
+from version import APP_DISPLAY_NAME
 
 _ = lambda x: x
 
@@ -75,6 +76,12 @@ DEFAULT_OPTIONS_JSON = r"""{
     "icon": "icons/summary",
     "open_in_window": true
   },
+  "Read Aloud": {
+    "action": "read_aloud",
+    "icon": "builtin:speaker",
+    "open_in_window": false,
+    "visible": true
+  },
   "Custom": {
     "prefix": "Make this change to the following text:\n\n",
     "instruction": "You are a writing and coding assistant. You MUST make the user\\'s described change to the text or code provided by the user. Output ONLY the appropriately modified text or code without additional comments. Respond in the same language as the input (e.g., English US, French). Do not answer or respond to the user\\'s text content. If the text or code is absolutely incompatible with the requested change, output \"ERROR_TEXT_INCOMPATIBLE_WITH_REQUEST\".",
@@ -82,6 +89,81 @@ DEFAULT_OPTIONS_JSON = r"""{
     "open_in_window": false
   }
 }"""
+
+
+class PopupButtonVisibilityDialog(QDialog):
+    """Choose which saved actions appear in the Ctrl+Space popup."""
+
+    def __init__(self, app, parent=None):
+        super().__init__(parent)
+        self.app = app
+        self.options = CustomPopupWindow.load_options()
+        self.checkboxes = {}
+
+        self.setWindowTitle("Choose Ctrl+Space Buttons")
+        self.setMinimumWidth(420)
+
+        layout = QVBoxLayout(self)
+        intro = QLabel(
+            "Choose the actions to show in the Ctrl+Space popup. Hidden actions "
+            "stay saved and can be shown again later."
+        )
+        intro.setWordWrap(True)
+        intro.setStyleSheet(
+            f"color: {'#fff' if colorMode == 'dark' else '#333'};"
+        )
+        layout.addWidget(intro)
+
+        for name, option in self.options.items():
+            # Custom is the text-entry area in the popup rather than a grid
+            # button, so it is intentionally not included here.
+            if name == "Custom":
+                continue
+            checkbox = QtWidgets.QCheckBox(name)
+            checkbox.setChecked(option.get("visible", True))
+            checkbox.setStyleSheet(
+                f"color: {'#fff' if colorMode == 'dark' else '#333'}; "
+                "font-size: 15px; padding: 4px;"
+            )
+            layout.addWidget(checkbox)
+            self.checkboxes[name] = checkbox
+
+        hint = QLabel("Tip: a hidden action's direct hotkey, if configured, still works.")
+        hint.setWordWrap(True)
+        hint.setStyleSheet(
+            f"color: {'#bbb' if colorMode == 'dark' else '#555'}; font-size: 12px;"
+        )
+        layout.addWidget(hint)
+
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        cancel_button = QPushButton("Cancel")
+        save_button = QPushButton("Save")
+        for button in (cancel_button, save_button):
+            button.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {'#444' if colorMode == 'dark' else '#f0f0f0'};
+                    color: {'#fff' if colorMode == 'dark' else '#000'};
+                    border: 1px solid {'#666' if colorMode == 'dark' else '#ccc'};
+                    border-radius: 5px;
+                    padding: 8px 18px;
+                }}
+                QPushButton:hover {{
+                    background-color: {'#555' if colorMode == 'dark' else '#e0e0e0'};
+                }}
+            """)
+        cancel_button.clicked.connect(self.reject)
+        save_button.clicked.connect(self.save)
+        button_layout.addWidget(cancel_button)
+        button_layout.addWidget(save_button)
+        layout.addLayout(button_layout)
+
+    def save(self):
+        for name, checkbox in self.checkboxes.items():
+            self.options[name]["visible"] = checkbox.isChecked()
+        CustomPopupWindow.save_options(self.options)
+        self.app.load_options()
+        self.accept()
 
 class ButtonEditDialog(QDialog):
     """
@@ -395,7 +477,7 @@ class CustomPopupWindow(QtWidgets.QWidget):
         logging.debug('Setting up CustomPopupWindow UI')
         self.setWindowFlags(QtCore.Qt.WindowStaysOnTopHint | QtCore.Qt.FramelessWindowHint)
         self.setAttribute(QtCore.Qt.WA_TranslucentBackground)
-        self.setWindowTitle("Writing Tools")
+        self.setWindowTitle(APP_DISPLAY_NAME)
         
         main_layout = QtWidgets.QVBoxLayout(self)
         main_layout.setContentsMargins(0,0,0,0)
@@ -583,19 +665,26 @@ class CustomPopupWindow(QtWidgets.QWidget):
         data = self.load_options()
 
         for k,v in data.items():
-            if k=="Custom":
+            if k == "Custom" or not v.get("visible", True):
                 continue
             b = DraggableButton(self, k, k)
-            icon_path = os.path.join(os.path.dirname(sys.argv[0]),
-                                    v["icon"] + ('_dark' if colorMode=='dark' else '_light') + '.png')
-            if os.path.exists(icon_path):
-                b.setIcon(QtGui.QIcon(icon_path))
+            if v.get("icon") == "builtin:speaker":
+                b.setIcon(self.style().standardIcon(
+                    QtWidgets.QStyle.StandardPixmap.SP_MediaVolume
+                ))
+            else:
+                icon_path = os.path.join(os.path.dirname(sys.argv[0]),
+                                        v["icon"] + ('_dark' if colorMode=='dark' else '_light') + '.png')
+                if os.path.exists(icon_path):
+                    b.setIcon(QtGui.QIcon(icon_path))
 
             # Tooltip surfaces the direct hotkey (if any) for discoverability.
             # Buttons without a hotkey get no tooltip — keeps things uncluttered.
             hotkey = (v.get("hotkey") or "").strip()
             if hotkey:
                 b.setToolTip(f"Direct hotkey: {hotkey}")
+            elif v.get("action") == "read_aloud":
+                b.setToolTip("Read the selected text locally with Sarah")
 
             if not self.edit_mode:
                 b.clicked.connect(partial(self.on_generic_instruction, k))
@@ -663,6 +752,13 @@ class CustomPopupWindow(QtWidgets.QWidget):
         """Add edit/delete icons as overlays with proper spacing."""
         if hasattr(btn, 'icon_container') and btn.icon_container:
             btn.icon_container.deleteLater()
+
+        # Read Aloud is a built-in local action rather than an editable AI
+        # prompt. It can still be dragged or hidden from Settings.
+        option = self.load_options().get(btn.key, {})
+        if option.get("action") == "read_aloud":
+            btn.icon_container = None
+            return
         
         btn.icon_container = QtWidgets.QWidget(btn)
         btn.icon_container.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents, False)

@@ -31,6 +31,7 @@ class SettingsWindow(QtWidgets.QWidget):
         self.autostart_checkbox = None
         self.shortcut_input = None
         self.review_before_insert_checkbox = None
+        self.read_aloud_provider_dropdown = None
         self.option_prompt_inputs = {}
         self.init_ui()
         self.retranslate_ui()
@@ -270,6 +271,31 @@ class SettingsWindow(QtWidgets.QWidget):
             )
             content_layout.addWidget(self.review_before_insert_checkbox)
 
+            read_aloud_label = QtWidgets.QLabel(_("Read Aloud Voice:"))
+            read_aloud_label.setStyleSheet(
+                f"font-size: 16px; color: {'#ffffff' if colorMode == 'dark' else '#333333'};"
+            )
+            content_layout.addWidget(read_aloud_label)
+
+            self.read_aloud_provider_dropdown = QtWidgets.QComboBox()
+            self.read_aloud_provider_dropdown.addItem(_("Writing Tools local voice"), "local")
+            self.read_aloud_provider_dropdown.addItem(_("Microsoft Word Read Aloud"), "word")
+            current_read_aloud_provider = self.app.config.get('read_aloud_provider', 'local')
+            selected_index = self.read_aloud_provider_dropdown.findData(current_read_aloud_provider)
+            self.read_aloud_provider_dropdown.setCurrentIndex(max(0, selected_index))
+            self.read_aloud_provider_dropdown.setToolTip(
+                _("Microsoft Word requires the installed Windows desktop version of Word. "
+                  "Writing Tools uses a temporary document and closes it without saving.")
+            )
+            self.read_aloud_provider_dropdown.setStyleSheet(f"""
+                font-size: 16px;
+                padding: 5px;
+                background-color: {'#444' if colorMode == 'dark' else 'white'};
+                color: {'#ffffff' if colorMode == 'dark' else '#000000'};
+                border: 1px solid {'#666' if colorMode == 'dark' else '#ccc'};
+            """)
+            content_layout.addWidget(self.read_aloud_provider_dropdown)
+
             # Add editable AI prompt section for every non-audio button.
             ai_prompt_label = QtWidgets.QLabel(_("AI Button Prompts"))
             ai_prompt_label.setStyleSheet(
@@ -475,6 +501,7 @@ class SettingsWindow(QtWidgets.QWidget):
             self.app.config['shortcut'] = self.shortcut_input.text()
             self.app.config['theme'] = 'gradient' if self.gradient_radio.isChecked() else 'plain'
             self.app.config['review_before_insert'] = self.review_before_insert_checkbox.isChecked()
+            self.app.config['read_aloud_provider'] = self.read_aloud_provider_dropdown.currentData()
         else:
             self.app.create_tray_icon()
 

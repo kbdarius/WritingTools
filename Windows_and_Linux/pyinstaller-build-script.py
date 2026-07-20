@@ -1,15 +1,17 @@
 import os
+import shutil
 import subprocess
 import sys
+from pathlib import Path
+from version import APP_DISPLAY_NAME
 
 
 def run_pyinstaller_build():
-    pyinstaller_command = [
-        "pyinstaller",
+    pyinstaller_arguments = [
         "--onefile",
         "--windowed",
         "--icon=icons/app_icon.ico",
-        "--name=Writing Tools",
+        f"--name={APP_DISPLAY_NAME}",
         "--clean",
         "--noconfirm",
         # Exclude unnecessary modules
@@ -24,6 +26,9 @@ def run_pyinstaller_build():
         "--exclude-module", "psutil",
         "--exclude-module", "pyzmq",
         "--exclude-module", "tornado",
+        "--exclude-module", "pandas",
+        "--exclude-module", "scipy",
+        "--additional-hooks-dir", "hooks",
         # Exclude modules related to PySide6 that are not used
         "--exclude-module", "PySide6.QtNetwork",
         "--exclude-module", "PySide6.QtXml",
@@ -72,27 +77,67 @@ def run_pyinstaller_build():
         "--exclude-module", "PySide6.Qt3DLogic",
         "--exclude-module", "PySide6.Qt3DAnimation",
         "--exclude-module", "PySide6.Qt3DExtras",
+        # Local Read Aloud is imported lazily, so collect its runtime and the
+        # native eSpeak/ONNX files explicitly.
+        "--hidden-import", "kokoro_onnx",
+        "--hidden-import", "piper",
+        "--hidden-import", "pythoncom",
+        "--hidden-import", "pywintypes",
+        "--hidden-import", "win32com.client",
+        "--collect-all", "espeakng_loader",
+        # Kokoro's phonemizer imports csvw/language-tags at runtime. The
+        # package's JSON registry is data (not Python), so PyInstaller will
+        # otherwise omit it and Read Aloud fails on the first click.
+        "--collect-data", "language_tags",
         "main.py"
     ]
 
+    # Conda-based Python environments keep several standard-library runtime
+    # DLLs outside Python's DLLs directory. PyInstaller cannot always discover
+    # them automatically, so explicitly bundle them when they are present.
+    runtime_bin = Path(sys.prefix) / "Library" / "bin"
+    for dll_name in (
+        "ffi.dll", "libbz2.dll", "libcrypto-3-x64.dll", "libexpat.dll",
+        "liblzma.dll", "libssl-3-x64.dll", "sqlite3.dll",
+    ):
+        dll_path = runtime_bin / dll_name
+        if dll_path.exists():
+            pyinstaller_arguments.extend(["--add-binary", f"{dll_path};."])
+
+    # Piper's Farsi phonemizer needs its voice tables, but not the package's
+    # training tools, web templates, Arabic diacritizer model, or image assets.
+    piper_espeak_data = (
+        Path(sys.prefix) / "Lib" / "site-packages" / "piper" / "espeak-ng-data"
+    )
+    if piper_espeak_data.exists():
+        pyinstaller_arguments.extend([
+            "--add-data", f"{piper_espeak_data};piper/espeak-ng-data"
+        ])
+
+    kokoro_config = (
+        Path(sys.prefix) / "Lib" / "site-packages" / "kokoro_onnx" / "config.json"
+    )
+    if kokoro_config.exists():
+        pyinstaller_arguments.extend([
+            "--add-data", f"{kokoro_config};kokoro_onnx"
+        ])
+
     try:
         # Remove previous build directories
-        if os.path.exists('dist'):
-            os.system("rmdir /s /q dist")
-        if os.path.exists('build'):
-            os.system("rmdir /s /q build")
-        if os.path.exists('__pycache__'):
-            os.system("rmdir /s /q __pycache__")
+        for build_artifact in ('dist', 'build', '__pycache__'):
+            if os.path.exists(build_artifact):
+                shutil.rmtree(build_artifact)
 
         # Run PyInstaller
-        subprocess.run(pyinstaller_command, check=True)
+        # Using the active interpreter avoids accidentally picking up a
+        # globally installed PyInstaller from another Python environment.
+        subprocess.run([sys.executable, "-m", "PyInstaller", *pyinstaller_arguments], check=True)
         print("Build completed successfully!")
 
         # Clean up unnecessary files
-        if os.path.exists('build'):
-            os.system("rmdir /s /q build")
-        if os.path.exists('__pycache__'):
-            os.system("rmdir /s /q __pycache__")
+        for build_artifact in ('build', '__pycache__'):
+            if os.path.exists(build_artifact):
+                shutil.rmtree(build_artifact)
 
         # No need to copy data files manually since they are included
         # in the executable using --add-data

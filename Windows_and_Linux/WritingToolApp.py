@@ -26,6 +26,7 @@ from PySide6.QtGui import QCursor, QGuiApplication
 from PySide6.QtWidgets import QApplication, QMessageBox
 from update_checker import UpdateChecker
 from version import APP_DISPLAY_NAME, APP_VERSION
+from word_speech import WordSpeechService
 
 _ = gettext.gettext
 
@@ -137,6 +138,7 @@ class WritingToolApp(QtWidgets.QApplication):
         self.paused = False
         self.toggle_action = None
         self.local_speech = LocalSpeechService()
+        self.word_speech = WordSpeechService()
         self.speech_progress_dialog = None
 
         # Holder for the user's selected text. Populated asynchronously by a
@@ -195,6 +197,9 @@ class WritingToolApp(QtWidgets.QApplication):
 
     @Slot()
     def _start_speech_warmup(self):
+        if self.config.get('read_aloud_provider', 'local') != 'local':
+            logging.info('Skipping local voice warm-up because Microsoft Word is selected')
+            return
         threading.Thread(
             target=self.local_speech.warm_up_english,
             daemon=True,
@@ -608,6 +613,7 @@ class WritingToolApp(QtWidgets.QApplication):
         """Stop pending synthesis/playback and reset its visible UI."""
         logging.info('Read Aloud canceled with Escape')
         self.local_speech.stop()
+        self.word_speech.stop()
         self._close_speech_progress()
         self._disable_speech_cancel_hotkey()
         if self.tray_icon:
@@ -1034,7 +1040,12 @@ class WritingToolApp(QtWidgets.QApplication):
                     (holder.capture_finished - holder.capture_started) * 1000,
                     2,
                 )
-            self.local_speech.speak(
+            speech_service = (
+                self.word_speech
+                if self.config.get('read_aloud_provider', 'local') == 'word'
+                else self.local_speech
+            )
+            speech_service.speak(
                 selected_text,
                 status_callback=self.speech_status_signal.emit,
                 error_callback=self.speech_error_signal.emit,
@@ -1113,14 +1124,18 @@ class WritingToolApp(QtWidgets.QApplication):
         if message == 'Read Aloud finished.':
             self._close_speech_progress()
             self._disable_speech_cancel_hotkey()
-        elif message.startswith('Reading selected text with'):
+        elif (
+            message.startswith('Reading selected text with')
+            and 'Microsoft Word' not in message
+        ):
             self._close_speech_progress()
         else:
             self._enable_speech_cancel_hotkey()
             if self.speech_progress_dialog is None:
                 dialog = QtWidgets.QProgressDialog('', '', 0, 0)
                 dialog.setWindowTitle('Read Aloud')
-                dialog.setCancelButton(None)
+                dialog.setCancelButtonText('Stop')
+                dialog.canceled.connect(self.cancel_read_aloud)
                 dialog.setWindowModality(QtCore.Qt.WindowModality.NonModal)
                 dialog.setMinimumWidth(340)
                 dialog.setAutoClose(False)
@@ -1335,7 +1350,7 @@ class WritingToolApp(QtWidgets.QApplication):
         self.toggle_action.triggered.connect(self.toggle_paused)
 
         stop_speech_action = self.tray_menu.addAction(self._('Stop Read Aloud'))
-        stop_speech_action.triggered.connect(self.local_speech.stop)
+        stop_speech_action.triggered.connect(self.cancel_read_aloud)
 
         # About menu item
         about_action = self.tray_menu.addAction(self._('About'))
@@ -1561,6 +1576,7 @@ class WritingToolApp(QtWidgets.QApplication):
         logging.debug('Stopping the listener')
         self._close_speech_progress()
         self.local_speech.stop()
+        self.word_speech.stop()
         self._stop_windows_hotkeys()
         if self.hotkey_listener is not None:
             self.hotkey_listener.stop()

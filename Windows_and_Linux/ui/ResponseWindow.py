@@ -380,7 +380,7 @@ class ResponseWindow(QtWidgets.QWidget):
             
         content_layout.addLayout(top_bar)
 
-        # Copy controls with matching text size
+        # Copy and insertion controls with matching text size
         copy_bar = QtWidgets.QHBoxLayout()
         copy_hint = QtWidgets.QLabel(_("Select to copy with formatting"))
         copy_hint.setStyleSheet(f"color: {'#aaaaaa' if colorMode == 'dark' else '#666666'}; font-size: 14px;")
@@ -391,6 +391,12 @@ class ResponseWindow(QtWidgets.QWidget):
         copy_md_btn.setStyleSheet(self.get_button_style())
         copy_md_btn.clicked.connect(self.copy_first_response)  # Updated to only copy first response
         copy_bar.addWidget(copy_md_btn)
+
+        insert_btn = QtWidgets.QPushButton(_("Insert at cursor"))
+        insert_btn.setStyleSheet(self.get_button_style())
+        insert_btn.setToolTip("Close this result and paste it where your cursor was")
+        insert_btn.clicked.connect(self.insert_first_response)
+        copy_bar.addWidget(insert_btn)
         content_layout.addLayout(copy_bar)
 
         # Loading indicator
@@ -488,6 +494,12 @@ class ResponseWindow(QtWidgets.QWidget):
         response_text = self.get_first_response_text()
         if response_text:
             QtWidgets.QApplication.clipboard().setText(response_text)
+
+    def insert_first_response(self):
+        """Return focus to the previous app and replace its selection/cursor."""
+        response_text = self.get_first_response_text()
+        if response_text:
+            self.app.insert_text_at_cursor(response_text, self)
 
     def get_button_style(self):
         return f"""

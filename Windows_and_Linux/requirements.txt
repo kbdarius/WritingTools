@@ -7,4 +7,7 @@ PySide6
 markdown2
 pyinstaller
 ollama
+kokoro-onnx==0.5.0
+piper-tts==1.5.0
+pywin32
 
