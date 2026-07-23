@@ -2,8 +2,24 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 from version import APP_DISPLAY_NAME
+
+
+def remove_tree_with_retries(path, required=True):
+    """Remove a build directory, tolerating brief scanner/sync locks on Windows."""
+    for attempt in range(3):
+        try:
+            shutil.rmtree(path)
+            return True
+        except PermissionError:
+            if attempt < 2:
+                time.sleep(1)
+    if required:
+        raise PermissionError(f"Could not remove locked build directory: {path}")
+    print(f"Warning: could not remove temporary build directory: {path}")
+    return False
 
 
 def run_pyinstaller_build():
@@ -126,7 +142,7 @@ def run_pyinstaller_build():
         # Remove previous build directories
         for build_artifact in ('dist', 'build', '__pycache__'):
             if os.path.exists(build_artifact):
-                shutil.rmtree(build_artifact)
+                remove_tree_with_retries(build_artifact)
 
         # Run PyInstaller
         # Using the active interpreter avoids accidentally picking up a
@@ -137,7 +153,7 @@ def run_pyinstaller_build():
         # Clean up unnecessary files
         for build_artifact in ('build', '__pycache__'):
             if os.path.exists(build_artifact):
-                shutil.rmtree(build_artifact)
+                remove_tree_with_retries(build_artifact, required=False)
 
         # No need to copy data files manually since they are included
         # in the executable using --add-data

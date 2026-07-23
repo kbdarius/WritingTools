@@ -17,7 +17,7 @@ import ui.CustomPopupWindow
 import ui.OnboardingWindow
 import ui.ResponseWindow
 import ui.SettingsWindow
-from aiprovider import GeminiProvider, OllamaProvider, OpenAICompatibleProvider, obfuscate_api_key
+from aiprovider import GitHubModelsProvider, GeminiProvider, OllamaProvider, OpenAICompatibleProvider, obfuscate_api_key
 from local_speech import LocalSpeechService
 from pynput import keyboard as pykeyboard
 from PySide6 import QtCore, QtGui, QtWidgets
@@ -156,7 +156,12 @@ class WritingToolApp(QtWidgets.QApplication):
         self.setup_ctrl_c_listener()
 
         # Setup available AI providers
-        self.providers = [GeminiProvider(self), OpenAICompatibleProvider(self), OllamaProvider(self)]
+        self.providers = [
+            GeminiProvider(self),
+            GitHubModelsProvider(self),
+            OpenAICompatibleProvider(self),
+            OllamaProvider(self),
+        ]
 
         if not self.config:
             logging.debug('No config found, showing onboarding')

@@ -3,7 +3,7 @@ google-genai
 openai
 pyperclip
 pynput
-PySide6
+PySide6==6.8.3
 markdown2
 pyinstaller
 ollama

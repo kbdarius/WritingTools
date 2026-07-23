@@ -2,7 +2,7 @@
 AI Provider Architecture for Writing Tools
 --------------------------------------------
 
-This module handles different AI model providers (Gemini, OpenAI-compatible, Ollama) and manages their interactions
+This module handles different AI model providers (Gemini, GitHub Models, OpenAI-compatible, Ollama) and manages their interactions
 with the main application. It uses an abstract base class pattern for provider implementations.
 
 Key Components:
@@ -18,6 +18,7 @@ Key Components:
 
 3. Provider Implementations:
     • GeminiProvider – Uses Google’s Generative AI API (Gemini) to generate content.
+    • GitHubModelsProvider – Uses a GitHub access token with the GitHub Models API
     • OpenAICompatibleProvider – Connects to any OpenAI-compatible API (v1/chat/completions)
     • OllamaProvider – Connects to a locally running Ollama server (e.g. for llama.cpp)
 
@@ -131,6 +132,20 @@ class TextSetting(AIProviderSetting):
 
     def get_value(self):
         return self.input.text()
+
+
+class SecretSetting(TextSetting):
+    """A masked text setting for API keys and access tokens."""
+
+    def render_to_layout(self, layout: QVBoxLayout):
+        super().render_to_layout(layout)
+        self.input.setEchoMode(QtWidgets.QLineEdit.EchoMode.Password)
+
+    def set_value(self, value):
+        # Provider secrets are stored obfuscated in config.json. Deobfuscating
+        # here also makes the value correct when the user switches providers in
+        # Settings before that provider has been loaded as the active provider.
+        self.internal_value = deobfuscate_api_key(value)
 
 
 class DropdownSetting(AIProviderSetting):
@@ -348,7 +363,7 @@ class GeminiProvider(AIProvider):
         self.client = None
 
         settings = [
-            TextSetting(name="api_key", display_name="API Key", description="Paste your Gemini API key here"),
+            SecretSetting(name="api_key", display_name="API Key", description="Paste your Gemini API key here"),
             DropdownSetting(
                 name="model_name",
                 display_name="Model",
@@ -514,7 +529,7 @@ class OpenAICompatibleProvider(AIProvider):
         self.client = None
 
         settings = [
-            TextSetting(name="api_key", display_name="API Key", description="API key for the OpenAI-compatible API."),
+            SecretSetting(name="api_key", display_name="API Key", description="API key for the OpenAI-compatible API."),
             TextSetting("api_base", "API Base URL", "https://api.openai.com/v1", "E.g. https://api.openai.com/v1"),
             TextSetting("api_organisation", "API Organisation", "", "Leave blank if not applicable."),
             TextSetting("api_project", "API Project", "", "Leave blank if not applicable."),
@@ -582,6 +597,77 @@ class OpenAICompatibleProvider(AIProvider):
 
     def cancel(self):
         self.close_requested = True
+
+
+class GitHubModelsProvider(OpenAICompatibleProvider):
+    """GitHub Models chat completions authenticated with a GitHub PAT."""
+
+    API_BASE = "https://models.github.ai/inference"
+
+    def __init__(self, app):
+        self.close_requested = None
+        self.client = None
+        settings = [
+            SecretSetting(
+                name="api_key",
+                display_name="GitHub Access Token",
+                description="Fine-grained GitHub PAT with Models: read access",
+            ),
+            DropdownSetting(
+                name="api_model",
+                display_name="Model",
+                default_value="openai/gpt-4.1-mini",
+                description="Select a model available through GitHub Models",
+                options=[
+                    ("GPT-4.1 mini (fast, recommended)", "openai/gpt-4.1-mini"),
+                    ("GPT-4.1", "openai/gpt-4.1"),
+                    ("GPT-4o mini", "openai/gpt-4o-mini"),
+                ],
+                allow_custom=True,
+                custom_placeholder="e.g., openai/gpt-4.1-mini",
+            ),
+        ]
+        AIProvider.__init__(
+            self,
+            app,
+            "GitHub Models",
+            settings,
+            "• Uses AI models through your GitHub account.\n"
+            "• Requires a fine-grained GitHub access token with Models: read access.\n"
+            "• Text is sent to GitHub Models when you run a writing command.",
+            "openai",
+            "Create GitHub Access Token",
+            lambda: webbrowser.open("https://github.com/settings/personal-access-tokens/new"),
+        )
+
+    def load_config(self, config: dict):
+        if "api_key" in config:
+            config = config.copy()
+            config["api_key"] = deobfuscate_api_key(config["api_key"])
+        AIProvider.load_config(self, config)
+
+    def save_config(self):
+        config = {}
+        for setting in self.settings:
+            value = setting.get_value()
+            if setting.name == "api_key":
+                value = obfuscate_api_key(value)
+            config[setting.name] = value
+        self.app.config["providers"][self.provider_name] = config
+        self.app.save_config(self.app.config)
+
+    def after_load(self):
+        self.api_base = self.API_BASE
+        self.api_organisation = None
+        self.api_project = None
+        self.client = OpenAI(
+            api_key=self.api_key,
+            base_url=self.api_base,
+            default_headers={
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+        )
 
 
 class OllamaProvider(AIProvider):
