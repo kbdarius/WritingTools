@@ -843,18 +843,13 @@ class CustomPopupWindow(QtWidgets.QWidget):
             self.reset_button.hide()
             self.drag_label.hide()
 
-            # Inform the user that the app will close to apply changes
-            msg = QtWidgets.QMessageBox()
-            msg.setWindowTitle("Quitting to apply changes...")
-            msg.setText("Writing Tools needs to relaunch to apply your changes & will now quit.\nPlease relaunch Writing Tools.exe to see your changes.")
-            msg.setStandardButtons(QtWidgets.QMessageBox.Ok)
-            msg.exec_()
-
+            # Apply edits immediately. The old implementation opened an
+            # unparented modal message box and quit the whole application.
+            # Because this popup is frameless and always-on-top, that dialog
+            # could be hidden behind it and make the visible window appear
+            # frozen. Reloading options and hotkeys in place needs no restart.
             self.app.load_options()
-            self.close()
-            # Instead of restarting, simply exit the app:
-            QtCore.QTimer.singleShot(100, self.app.exit_app)
-            return
+            self.app.register_hotkey()
 
 
         # Update the edit button icon now that icon_name is defined
