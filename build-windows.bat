@@ -3,7 +3,7 @@ setlocal
 
 cd /d "%~dp0Windows_and_Linux"
 
-echo [1/4] Finding Python...
+echo [1/5] Finding Python...
 where py >nul 2>nul
 if not errorlevel 1 (
     py -3 -m venv --help >nul 2>nul
@@ -16,7 +16,7 @@ python -m venv --help >nul 2>nul
 if errorlevel 1 goto :python_missing
 
 if not exist ".build-venv\Scripts\python.exe" (
-    echo [2/4] Creating build environment...
+    echo [2/5] Creating build environment...
     python -m venv .build-venv
     if errorlevel 1 goto :failed
 )
@@ -24,7 +24,7 @@ goto :build
 
 :python_found
 if not exist ".build-venv\Scripts\python.exe" (
-    echo [2/4] Creating build environment...
+    echo [2/5] Creating build environment...
     py -3 -m venv .build-venv
     if errorlevel 1 goto :failed
 )
@@ -32,11 +32,11 @@ if not exist ".build-venv\Scripts\python.exe" (
 :build
 set "BUILD_PYTHON=%CD%\.build-venv\Scripts\python.exe"
 
-echo [3/4] Installing build dependencies...
+echo [3/5] Installing build dependencies...
 "%BUILD_PYTHON%" -m pip install --disable-pip-version-check -r requirements.txt
 if errorlevel 1 goto :failed
 
-echo [4/4] Building Writing Tools...
+echo [4/5] Building Writing Tools...
 "%BUILD_PYTHON%" pyinstaller-build-script.py
 if errorlevel 1 goto :failed
 
@@ -48,8 +48,12 @@ if not exist "dist\%EXE_NAME%" goto :failed
 copy /y "dist\%EXE_NAME%" "%~dp0%EXE_NAME%" >nul
 if errorlevel 1 goto :failed
 
+echo [5/5] Replacing the previous version and starting the new build...
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0Windows_and_Linux\finalize-windows-build.ps1" -RepoRoot "%~dp0." -ExeName "%EXE_NAME%"
+if errorlevel 1 goto :failed
+
 echo.
-echo Build complete: %~dp0%EXE_NAME%
+echo Build complete and running: %~dp0%EXE_NAME%
 exit /b 0
 
 :python_missing
