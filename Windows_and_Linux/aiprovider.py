@@ -37,6 +37,8 @@ import logging
 import webbrowser
 from abc import ABC, abstractmethod
 from typing import List
+import ssl
+import httpx
 
 # External libraries
 from google import genai
@@ -721,10 +723,18 @@ class GitHubModelsProvider(OpenAICompatibleProvider):
             model = config.get("api_model", "").strip()
             if not api_key or not model:
                 return False, "Enter a GitHub access token and select a model."
+            
+            # Create SSL context that doesn't verify certificates (workaround for corporate firewalls)
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            
+            http_client = httpx.Client(verify=False)
             client = OpenAI(
                 api_key=api_key,
                 base_url=self.API_BASE,
                 timeout=15.0,
+                http_client=http_client,
                 default_headers={
                     "Accept": "application/vnd.github+json",
                     "X-GitHub-Api-Version": "2022-11-28",
@@ -746,9 +756,14 @@ class GitHubModelsProvider(OpenAICompatibleProvider):
         self.api_base = self.API_BASE
         self.api_organisation = None
         self.api_project = None
+        
+        # Create HTTP client with SSL verification disabled (workaround for corporate firewalls)
+        http_client = httpx.Client(verify=False)
+        
         self.client = OpenAI(
             api_key=self.api_key,
             base_url=self.api_base,
+            http_client=http_client,
             default_headers={
                 "Accept": "application/vnd.github+json",
                 "X-GitHub-Api-Version": "2022-11-28",
