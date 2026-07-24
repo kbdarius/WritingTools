@@ -5,7 +5,6 @@ from __future__ import annotations
 import html
 import logging
 import os
-import re
 import sys
 import threading
 import time
@@ -25,7 +24,10 @@ ErrorCallback = Optional[Callable[[str], None]]
 class AzureSpeechService:
     """Synthesize speech through the Azure Speech REST endpoint."""
 
-    OUTPUT_FORMAT = "riff-24khz-16bit-mono-pcm"
+    # 24 kHz PCM needs about 48 KB/s and was badly delayed by filtered
+    # corporate connections. 16 kHz retains clear speech while completing
+    # more than ten times faster in measured tests on those connections.
+    OUTPUT_FORMAT = "riff-16khz-16bit-mono-pcm"
     DEFAULT_REGION = "eastus"
     ENGLISH_VOICE = "en-US-JennyNeural"
     PERSIAN_VOICE = "fa-IR-DilaraNeural"
@@ -77,12 +79,16 @@ class AzureSpeechService:
             for index, chunk in enumerate(chunks):
                 if not self._is_current(request_id):
                     return
-                self._notify(status_callback, f"Preparing part {index + 1} of {len(chunks)}...")
+                self._notify(status_callback, "Preparing Azure speech...")
                 synthesis_started = time.perf_counter()
                 audio_path = self.audio_dir / f"read-aloud-{index % 2}.wav"
-                self._synthesize(chunk, key, region, audio_path, self._voice_for(text))
+                request_metrics = self._synthesize(
+                    chunk, key, region, audio_path, self._voice_for(text)
+                )
                 chunk_synthesis_ms = self._elapsed_ms(synthesis_started)
                 total_synthesis_ms += chunk_synthesis_ms
+                record["azure_headers_ms"] = request_metrics["headers_ms"]
+                record["azure_download_ms"] = request_metrics["download_ms"]
 
                 if not self._is_current(request_id):
                     return
@@ -96,7 +102,7 @@ class AzureSpeechService:
                     playback_started = time.perf_counter()
                     record["first_chunk_synthesis_ms"] = chunk_synthesis_ms
                     record["time_to_audio_ms"] = self._elapsed_ms(started)
-                self._notify(status_callback, f"Reading part {index + 1} of {len(chunks)}...")
+                self._notify(status_callback, "Reading with Azure Speech...")
                 deadline = time.monotonic() + audio_seconds
                 while self._is_current(request_id) and time.monotonic() < deadline:
                     time.sleep(0.05)
@@ -161,7 +167,9 @@ class AzureSpeechService:
         region = settings.get("region", "") or os.environ.get("AZURE_SPEECH_REGION", "")
         return key.strip(), (region.strip() or self.DEFAULT_REGION)
 
-    def _synthesize(self, text: str, key: str, region: str, output_path: Path, voice: str) -> None:
+    def _synthesize(
+        self, text: str, key: str, region: str, output_path: Path, voice: str
+    ) -> dict[str, float]:
         ssml = (
             '<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" '
             'xml:lang="en-US">'
@@ -181,9 +189,17 @@ class AzureSpeechService:
             method="POST",
         )
         self.audio_dir.mkdir(parents=True, exist_ok=True)
+        request_started = time.perf_counter()
         try:
             with urllib.request.urlopen(request, timeout=30) as response:
-                output_path.write_bytes(response.read())
+                headers_received = time.perf_counter()
+                audio = response.read()
+                download_finished = time.perf_counter()
+                output_path.write_bytes(audio)
+                return {
+                    "headers_ms": round((headers_received - request_started) * 1000, 2),
+                    "download_ms": round((download_finished - headers_received) * 1000, 2),
+                }
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace").strip()
             raise RuntimeError(f"Azure Speech request failed ({exc.code}): {detail or exc.reason}") from exc
@@ -197,34 +213,10 @@ class AzureSpeechService:
         return cls.PERSIAN_VOICE if persian > latin else cls.ENGLISH_VOICE
 
     @staticmethod
-    def _chunk_text(text: str, target_chars: int = 240, max_chars: int = 500) -> list[str]:
+    def _chunk_text(text: str) -> list[str]:
+        """Return one request so Azure produces uninterrupted speech."""
         cleaned = " ".join(text.split())
-        if not cleaned:
-            return []
-        sentences = re.split(r"(?<=[.!?\u061f\u061b])\s+", cleaned)
-        pieces: list[str] = []
-        for sentence in sentences:
-            remaining = sentence.strip()
-            while len(remaining) > max_chars:
-                split_at = remaining.rfind(" ", 0, max_chars + 1)
-                if split_at < target_chars // 2:
-                    split_at = max_chars
-                pieces.append(remaining[:split_at].strip())
-                remaining = remaining[split_at:].strip()
-            if remaining:
-                pieces.append(remaining)
-        chunks: list[str] = []
-        current = ""
-        for piece in pieces:
-            candidate = f"{current} {piece}".strip()
-            if current and len(candidate) > target_chars:
-                chunks.append(current)
-                current = piece
-            else:
-                current = candidate
-        if current:
-            chunks.append(current)
-        return chunks
+        return [cleaned] if cleaned else []
 
     def _begin_request(self) -> int:
         self.stop()
