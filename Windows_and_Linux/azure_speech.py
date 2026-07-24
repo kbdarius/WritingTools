@@ -129,6 +129,32 @@ class AzureSpeechService:
             except Exception:
                 logging.debug("No active Azure Read Aloud playback", exc_info=True)
 
+    def test_connection(self, key: str, region: str) -> None:
+        """Synthesize and play a short sample, raising on any connection error."""
+        if not sys.platform.startswith("win"):
+            raise RuntimeError("Azure Read Aloud is currently available on Windows only.")
+        key = key.strip()
+        region = region.strip() or self.DEFAULT_REGION
+        if not key:
+            raise RuntimeError("Enter an Azure Speech resource key first.")
+
+        import winsound
+
+        output_path = self.audio_dir / "connection-test.wav"
+        self._synthesize(
+            "Azure Speech is connected and working.",
+            key,
+            region,
+            output_path,
+            self.ENGLISH_VOICE,
+        )
+        winsound.PlaySound(
+            str(output_path),
+            # Playback is synchronous when SND_ASYNC is omitted. Python 3.11
+            # does not expose a separate SND_SYNC constant.
+            winsound.SND_FILENAME | winsound.SND_NODEFAULT,
+        )
+
     def _credentials(self) -> tuple[str, str]:
         settings = self.config.get("azure_speech", {})
         key = settings.get("key", "") or os.environ.get("AZURE_SPEECH_KEY", "")

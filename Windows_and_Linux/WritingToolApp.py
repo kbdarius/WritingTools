@@ -112,6 +112,10 @@ class WritingToolApp(QtWidgets.QApplication):
         self.config_path = None
         self.load_config()
 
+        # Azure is temporarily the only exposed Read Aloud provider. Force it
+        # in memory so an older saved local/Word choice cannot silently run.
+        self.config['read_aloud_provider'] = 'azure'
+
         # Run any pending config migrations in a single pass (single restart).
         self._migrate_config()
 
@@ -1048,12 +1052,8 @@ class WritingToolApp(QtWidgets.QApplication):
                     (holder.capture_finished - holder.capture_started) * 1000,
                     2,
                 )
-            provider = self.config.get('read_aloud_provider', 'local')
-            speech_service = {
-                'word': self.word_speech,
-                'azure': self.azure_speech,
-            }.get(provider, self.local_speech)
-            speech_service.speak(
+            logging.info('Read Aloud provider: Microsoft Azure Speech')
+            self.azure_speech.speak(
                 selected_text,
                 status_callback=self.speech_status_signal.emit,
                 error_callback=self.speech_error_signal.emit,

@@ -20,6 +20,7 @@ class SettingsWindow(QtWidgets.QWidget):
     """
     close_signal = QtCore.Signal()
     validation_finished = QtCore.Signal(bool, str)
+    azure_test_finished = QtCore.Signal(bool, str)
 
     def __init__(self, app, providers_only=False):
         super().__init__()
@@ -36,6 +37,7 @@ class SettingsWindow(QtWidgets.QWidget):
         self.read_aloud_provider_dropdown = None
         self.azure_speech_key_input = None
         self.azure_speech_region_input = None
+        self.azure_test_button = None
         self.option_prompt_inputs = {}
         self.save_button = None
         self.validation_label = None
@@ -44,6 +46,7 @@ class SettingsWindow(QtWidgets.QWidget):
         self._pending_provider_config = None
         self.init_ui()
         self.validation_finished.connect(self._finish_provider_validation)
+        self.azure_test_finished.connect(self._finish_azure_speech_test)
         self.retranslate_ui()
 
 
@@ -297,15 +300,9 @@ class SettingsWindow(QtWidgets.QWidget):
             content_layout.addWidget(read_aloud_label)
 
             self.read_aloud_provider_dropdown = NoWheelComboBox()
-            self.read_aloud_provider_dropdown.addItem(_("Writing Tools local voice"), "local")
-            self.read_aloud_provider_dropdown.addItem(_("Microsoft Word Read Aloud"), "word")
             self.read_aloud_provider_dropdown.addItem(_("Microsoft Azure Speech"), "azure")
-            current_read_aloud_provider = self.app.config.get('read_aloud_provider', 'local')
-            selected_index = self.read_aloud_provider_dropdown.findData(current_read_aloud_provider)
-            self.read_aloud_provider_dropdown.setCurrentIndex(max(0, selected_index))
             self.read_aloud_provider_dropdown.setToolTip(
-                _("Microsoft Word requires the installed Windows desktop version of Word. "
-                  "Writing Tools uses a temporary document and closes it without saving.")
+                _("Azure Speech is temporarily the only available Read Aloud provider.")
             )
             self.read_aloud_provider_dropdown.setStyleSheet(f"""
                 font-size: 16px;
@@ -337,6 +334,13 @@ class SettingsWindow(QtWidgets.QWidget):
             )
             self.azure_speech_region_input.setPlaceholderText(_("For example: eastus"))
             content_layout.addWidget(self.azure_speech_region_input)
+
+            self.azure_test_button = QtWidgets.QPushButton(_("Test Azure Speech"))
+            self.azure_test_button.setToolTip(
+                _("Connect to Azure and play a short test sentence through your speakers.")
+            )
+            self.azure_test_button.clicked.connect(self.test_azure_speech)
+            content_layout.addWidget(self.azure_test_button)
 
             # Prompt management lives on its own tab.
             content_layout = prompts_layout
@@ -613,6 +617,43 @@ class SettingsWindow(QtWidgets.QWidget):
     def test_provider_connection(self):
         provider = self.app.providers[self.provider_dropdown.currentIndex()]
         self._start_provider_validation(provider, provider.get_pending_config(), apply_after=False)
+
+    def test_azure_speech(self):
+        if self._validation_in_progress:
+            return
+        key = self.azure_speech_key_input.text().strip()
+        region = self.azure_speech_region_input.text().strip()
+        self._validation_in_progress = True
+        self.azure_test_button.setEnabled(False)
+        self.save_button.setEnabled(False)
+        self.validation_label.setText(_("Connecting to Azure Speech and creating a test sound..."))
+        self.validation_label.setStyleSheet(
+            f"color: {'#ffffff' if colorMode == 'dark' else '#333333'}; font-size: 14px;"
+        )
+        self.validation_label.show()
+
+        def worker():
+            try:
+                self.app.azure_speech.test_connection(key, region)
+                success = True
+                message = "Azure Speech connected successfully. The test sound was played."
+            except Exception as exc:
+                success = False
+                message = f"Azure Speech test failed: {exc}"
+            self.azure_test_finished.emit(success, message)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    @QtCore.Slot(bool, str)
+    def _finish_azure_speech_test(self, success, message):
+        self._validation_in_progress = False
+        self.azure_test_button.setEnabled(True)
+        self.save_button.setEnabled(True)
+        self.validation_label.setText(message)
+        self.validation_label.setStyleSheet(
+            f"color: {'#63d471' if success else '#d93025'}; font-size: 14px; font-weight: bold;"
+        )
+        self.validation_label.show()
 
     def _start_provider_validation(self, provider, config, apply_after, options=None):
         if self._validation_in_progress:
