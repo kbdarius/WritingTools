@@ -18,6 +18,7 @@ import ui.OnboardingWindow
 import ui.ResponseWindow
 import ui.SettingsWindow
 from aiprovider import GitHubModelsProvider, GeminiProvider, OllamaProvider, OpenAICompatibleProvider, obfuscate_api_key
+from azure_speech import AzureSpeechService
 from local_speech import LocalSpeechService
 from pynput import keyboard as pykeyboard
 from PySide6 import QtCore, QtGui, QtWidgets
@@ -138,6 +139,7 @@ class WritingToolApp(QtWidgets.QApplication):
         self.paused = False
         self.toggle_action = None
         self.local_speech = LocalSpeechService()
+        self.azure_speech = AzureSpeechService(self.config or {})
         self.word_speech = WordSpeechService()
         self.speech_progress_dialog = None
 
@@ -203,7 +205,7 @@ class WritingToolApp(QtWidgets.QApplication):
     @Slot()
     def _start_speech_warmup(self):
         if self.config.get('read_aloud_provider', 'local') != 'local':
-            logging.info('Skipping local voice warm-up because Microsoft Word is selected')
+            logging.info('Skipping local voice warm-up because a cloud/Word voice is selected')
             return
         threading.Thread(
             target=self.local_speech.warm_up_english,
@@ -618,6 +620,7 @@ class WritingToolApp(QtWidgets.QApplication):
         """Stop pending synthesis/playback and reset its visible UI."""
         logging.info('Read Aloud canceled with Escape')
         self.local_speech.stop()
+        self.azure_speech.stop()
         self.word_speech.stop()
         self._close_speech_progress()
         self._disable_speech_cancel_hotkey()
@@ -1045,11 +1048,11 @@ class WritingToolApp(QtWidgets.QApplication):
                     (holder.capture_finished - holder.capture_started) * 1000,
                     2,
                 )
-            speech_service = (
-                self.word_speech
-                if self.config.get('read_aloud_provider', 'local') == 'word'
-                else self.local_speech
-            )
+            provider = self.config.get('read_aloud_provider', 'local')
+            speech_service = {
+                'word': self.word_speech,
+                'azure': self.azure_speech,
+            }.get(provider, self.local_speech)
             speech_service.speak(
                 selected_text,
                 status_callback=self.speech_status_signal.emit,
@@ -1587,6 +1590,7 @@ class WritingToolApp(QtWidgets.QApplication):
         logging.debug('Stopping the listener')
         self._close_speech_progress()
         self.local_speech.stop()
+        self.azure_speech.stop()
         self.word_speech.stop()
         self._stop_windows_hotkeys()
         if self.hotkey_listener is not None:

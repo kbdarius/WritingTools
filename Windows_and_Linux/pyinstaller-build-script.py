@@ -111,14 +111,22 @@ def run_pyinstaller_build():
     # Conda-based Python environments keep several standard-library runtime
     # DLLs outside Python's DLLs directory. PyInstaller cannot always discover
     # them automatically, so explicitly bundle them when they are present.
-    runtime_bin = Path(sys.prefix) / "Library" / "bin"
-    for dll_name in (
-        "ffi.dll", "libbz2.dll", "libcrypto-3-x64.dll", "libexpat.dll",
-        "liblzma.dll", "libssl-3-x64.dll", "sqlite3.dll",
-    ):
-        dll_path = runtime_bin / dll_name
-        if dll_path.exists():
-            pyinstaller_arguments.extend(["--add-binary", f"{dll_path};."])
+    runtime_dll_names = (
+        "ffi.dll", "ffi-7.dll", "ffi-8.dll", "libffi-7.dll", "libffi-8.dll",
+        "libbz2.dll", "libcrypto-3-x64.dll", "libexpat.dll", "liblzma.dll",
+        "libssl-3-x64.dll", "sqlite3.dll",
+    )
+    bundled_runtime_dlls = set()
+    # A venv created from Anaconda keeps sys.prefix inside the venv while its
+    # native runtime DLLs remain under sys.base_prefix\Library\bin.
+    for python_root in {Path(sys.prefix), Path(sys.base_prefix)}:
+        runtime_bin = python_root / "Library" / "bin"
+        for dll_name in runtime_dll_names:
+            dll_path = runtime_bin / dll_name
+            normalized_path = str(dll_path.resolve()).casefold()
+            if dll_path.exists() and normalized_path not in bundled_runtime_dlls:
+                pyinstaller_arguments.extend(["--add-binary", f"{dll_path};."])
+                bundled_runtime_dlls.add(normalized_path)
 
     # Piper's Farsi phonemizer needs its voice tables, but not the package's
     # training tools, web templates, Arabic diacritizer model, or image assets.
