@@ -1,7 +1,8 @@
 import os
 import sys
+import threading
 
-from aiprovider import AIProvider
+from aiprovider import AIProvider, NoWheelComboBox
 from PySide6 import QtCore, QtWidgets
 from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QHBoxLayout, QRadioButton, QScrollArea
@@ -18,6 +19,7 @@ class SettingsWindow(QtWidgets.QWidget):
     Now with scrolling support for better usability on smaller screens.
     """
     close_signal = QtCore.Signal()
+    validation_finished = QtCore.Signal(bool, str)
 
     def __init__(self, app, providers_only=False):
         super().__init__()
@@ -33,7 +35,13 @@ class SettingsWindow(QtWidgets.QWidget):
         self.review_before_insert_checkbox = None
         self.read_aloud_provider_dropdown = None
         self.option_prompt_inputs = {}
+        self.save_button = None
+        self.validation_label = None
+        self._validation_in_progress = False
+        self._pending_provider = None
+        self._pending_provider_config = None
         self.init_ui()
+        self.validation_finished.connect(self._finish_provider_validation)
         self.retranslate_ui()
 
 
@@ -168,19 +176,7 @@ class SettingsWindow(QtWidgets.QWidget):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(10)  # Add spacing between scroll area and bottom elements
 
-        # Earlier scroll_area and scroll_content creation moved up
-        # Create scroll area
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
-        scroll_area.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-
-        # Create scroll content widget
-        scroll_content = QtWidgets.QWidget()
-        scroll_content.setStyleSheet("background: transparent;")
-        
-        # Style the scroll area for transparency
-        scroll_area.setStyleSheet("""
+        scroll_style = """
             QScrollArea {
                 background: transparent;
                 border: none;
@@ -202,13 +198,34 @@ class SettingsWindow(QtWidgets.QWidget):
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
                 height: 0px;
             }
-        """)
+        """
 
-        # Create a widget to hold the scrollable content
-        scroll_content = QtWidgets.QWidget()
-        content_layout = QtWidgets.QVBoxLayout(scroll_content)
-        content_layout.setContentsMargins(30, 30, 30, 30)
-        content_layout.setSpacing(20)
+        def create_scroll_page():
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+            scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            scroll.setStyleSheet(scroll_style)
+            content = QtWidgets.QWidget()
+            content.setStyleSheet("background: transparent;")
+            layout = QtWidgets.QVBoxLayout(content)
+            layout.setContentsMargins(30, 25, 30, 25)
+            layout.setSpacing(16)
+            scroll.setWidget(content)
+            return scroll, layout
+
+        tabs = QtWidgets.QTabWidget()
+        tabs.setDocumentMode(True)
+        general_page, general_layout = create_scroll_page()
+        prompts_page, prompts_layout = create_scroll_page()
+        ai_page, ai_layout = create_scroll_page()
+        if not self.providers_only:
+            tabs.addTab(general_page, _("General"))
+            tabs.addTab(prompts_page, _("Prompts"))
+        tabs.addTab(ai_page, _("AI Provider"))
+        main_layout.addWidget(tabs)
+
+        content_layout = general_layout
 
         if not self.providers_only:
             title_label = QtWidgets.QLabel(_("Settings"))
@@ -277,7 +294,7 @@ class SettingsWindow(QtWidgets.QWidget):
             )
             content_layout.addWidget(read_aloud_label)
 
-            self.read_aloud_provider_dropdown = QtWidgets.QComboBox()
+            self.read_aloud_provider_dropdown = NoWheelComboBox()
             self.read_aloud_provider_dropdown.addItem(_("Writing Tools local voice"), "local")
             self.read_aloud_provider_dropdown.addItem(_("Microsoft Word Read Aloud"), "word")
             current_read_aloud_provider = self.app.config.get('read_aloud_provider', 'local')
@@ -296,7 +313,8 @@ class SettingsWindow(QtWidgets.QWidget):
             """)
             content_layout.addWidget(self.read_aloud_provider_dropdown)
 
-            # Add editable AI prompt section for every non-audio button.
+            # Prompt management lives on its own tab.
+            content_layout = prompts_layout
             ai_prompt_label = QtWidgets.QLabel(_("AI Button Prompts"))
             ai_prompt_label.setStyleSheet(
                 f"font-size: 18px; font-weight: bold; color: {'#ffffff' if colorMode == 'dark' else '#333333'};"
@@ -326,11 +344,25 @@ class SettingsWindow(QtWidgets.QWidget):
                 section_layout = QtWidgets.QVBoxLayout(section)
                 section_layout.setSpacing(8)
 
-                section_title = QtWidgets.QLabel(option_name)
-                section_title.setStyleSheet(
-                    f"font-size: 16px; font-weight: bold; color: {'#ffffff' if colorMode == 'dark' else '#333333'};"
+                name_row = QtWidgets.QHBoxLayout()
+                name_input = QtWidgets.QLineEdit(option_name)
+                name_input.setPlaceholderText(_("Prompt name"))
+                name_input.setStyleSheet(
+                    f"font-size: 16px; font-weight: bold; background-color: {'#444' if colorMode == 'dark' else 'white'}; "
+                    f"color: {'#ffffff' if colorMode == 'dark' else '#000000'}; border: 1px solid {'#666' if colorMode == 'dark' else '#ccc'};"
                 )
-                section_layout.addWidget(section_title)
+                name_row.addWidget(name_input)
+                delete_button = QtWidgets.QPushButton(_("Delete"))
+                delete_button.setStyleSheet(
+                    "QPushButton { background-color: #b3261e; color: white; border: none; "
+                    "border-radius: 5px; padding: 7px 12px; } "
+                    "QPushButton:hover { background-color: #8c1d18; }"
+                )
+                delete_button.clicked.connect(
+                    lambda _checked=False, name=option_name: self.mark_prompt_deleted(name)
+                )
+                name_row.addWidget(delete_button)
+                section_layout.addLayout(name_row)
 
                 prefix_label = QtWidgets.QLabel(_("Prefix"))
                 prefix_label.setStyleSheet(
@@ -358,11 +390,16 @@ class SettingsWindow(QtWidgets.QWidget):
                 section_layout.addWidget(instruction_input)
 
                 self.option_prompt_inputs[option_name] = {
+                    "name": name_input,
                     "prefix": prefix_input,
                     "instruction": instruction_input,
+                    "section": section,
+                    "deleted": False,
                 }
                 content_layout.addWidget(section)
 
+            # Return to the General tab for appearance controls.
+            content_layout = general_layout
             # Add theme selection
             theme_label = QtWidgets.QLabel(_("Background Theme:"))
             theme_label.setStyleSheet(f"font-size: 16px; color: {'#ffffff' if colorMode == 'dark' else '#333333'};")
@@ -380,12 +417,14 @@ class SettingsWindow(QtWidgets.QWidget):
             theme_layout.addWidget(self.plain_radio)
             content_layout.addLayout(theme_layout)
 
+        # Provider controls live on the AI Provider tab.
+        content_layout = ai_layout
         # Add provider selection
         provider_label = QtWidgets.QLabel(_("Choose AI Provider:"))
         provider_label.setStyleSheet(f"font-size: 16px; color: {'#ffffff' if colorMode == 'dark' else '#333333'};")
         content_layout.addWidget(provider_label)
 
-        self.provider_dropdown = QtWidgets.QComboBox()
+        self.provider_dropdown = NoWheelComboBox()
         self.provider_dropdown.setStyleSheet(f"""
             font-size: 16px;
             padding: 5px;
@@ -414,21 +453,26 @@ class SettingsWindow(QtWidgets.QWidget):
         # Initialize provider UI
         provider_instance = self.app.providers[self.provider_dropdown.currentIndex()]
         self.init_provider_ui(provider_instance, self.provider_container)
+        self._initial_provider_state = (
+            self.provider_dropdown.currentText(),
+            provider_instance.get_pending_config().copy(),
+        )
 
         # Connect provider dropdown
         self.provider_dropdown.currentIndexChanged.connect(
-            lambda: self.init_provider_ui(self.app.providers[self.provider_dropdown.currentIndex()], self.provider_container)
+            self._provider_selection_changed
         )
+
+        test_button = QtWidgets.QPushButton(_("Test Connection"))
+        test_button.setToolTip(_("Verify that the selected credentials can reach the selected model."))
+        test_button.clicked.connect(self.test_provider_connection)
+        content_layout.addWidget(test_button)
 
         # Add horizontal separator
         line = QtWidgets.QFrame()
         line.setFrameShape(QtWidgets.QFrame.Shape.HLine)
         line.setFrameShadow(QtWidgets.QFrame.Shadow.Sunken)
         content_layout.addWidget(line)
-
-        # Set up scroll area with content
-        scroll_area.setWidget(scroll_content)
-        main_layout.addWidget(scroll_area)
 
         # Create bottom container for save button and restart notice
         bottom_container = QtWidgets.QWidget()
@@ -438,8 +482,8 @@ class SettingsWindow(QtWidgets.QWidget):
         bottom_layout.setSpacing(10)
 
         # Add save button to bottom container
-        save_button = QtWidgets.QPushButton(_("Finish AI Setup") if self.providers_only else _("Save"))
-        save_button.setStyleSheet("""
+        self.save_button = QtWidgets.QPushButton(_("Finish AI Setup") if self.providers_only else _("Save"))
+        self.save_button.setStyleSheet("""
             QPushButton {
                 background-color: #4CAF50;
                 color: white;
@@ -452,8 +496,14 @@ class SettingsWindow(QtWidgets.QWidget):
                 background-color: #45a049;
             }
         """)
-        save_button.clicked.connect(self.save_settings)
-        bottom_layout.addWidget(save_button)
+        self.save_button.clicked.connect(self.save_settings)
+        bottom_layout.addWidget(self.save_button)
+
+        self.validation_label = QtWidgets.QLabel("")
+        self.validation_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.validation_label.setWordWrap(True)
+        self.validation_label.hide()
+        bottom_layout.addWidget(self.validation_label)
 
         if not self.providers_only:
             restart_text = "<p style='text-align: center;'>" + \
@@ -481,18 +531,127 @@ class SettingsWindow(QtWidgets.QWidget):
     def show_button_visibility_dialog(self):
         PopupButtonVisibilityDialog(self.app, self).exec_()
 
+    def mark_prompt_deleted(self, option_name):
+        editors = self.option_prompt_inputs.get(option_name)
+        if not editors:
+            return
+        editors["deleted"] = True
+        editors["section"].hide()
+
+    def _provider_selection_changed(self):
+        provider = self.app.providers[self.provider_dropdown.currentIndex()]
+        self.init_provider_ui(provider, self.provider_container)
+        if self.validation_label:
+            self.validation_label.hide()
+
+    def _build_updated_options(self):
+        options = self.app.options.copy() if self.app.options else {}
+        renamed = {}
+        used_names = set()
+
+        for original_name, option_config in options.items():
+            editors = self.option_prompt_inputs.get(original_name)
+            if not editors:
+                if original_name in used_names:
+                    QtWidgets.QMessageBox.warning(self, _("Duplicate name"), _("Every prompt must have a unique name."))
+                    return None
+                renamed[original_name] = option_config.copy()
+                used_names.add(original_name)
+                continue
+            if editors["deleted"]:
+                continue
+
+            new_name = editors["name"].text().strip()
+            if not new_name:
+                QtWidgets.QMessageBox.warning(self, _("Missing name"), _("Prompt names cannot be blank."))
+                return None
+            if new_name in used_names:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    _("Duplicate name"),
+                    _("Every prompt must have a unique name. Please rename '%s'.") % new_name,
+                )
+                return None
+
+            updated = option_config.copy()
+            updated["prefix"] = editors["prefix"].text()
+            updated["instruction"] = editors["instruction"].toPlainText()
+            renamed[new_name] = updated
+            used_names.add(new_name)
+
+        return renamed
+
+    def _current_provider_state(self):
+        provider = self.app.providers[self.provider_dropdown.currentIndex()]
+        return self.provider_dropdown.currentText(), provider.get_pending_config().copy()
+
+    def test_provider_connection(self):
+        provider = self.app.providers[self.provider_dropdown.currentIndex()]
+        self._start_provider_validation(provider, provider.get_pending_config(), apply_after=False)
+
+    def _start_provider_validation(self, provider, config, apply_after, options=None):
+        if self._validation_in_progress:
+            return
+        self._validation_in_progress = True
+        self._validation_apply_after = apply_after
+        self._pending_options = options
+        self._pending_provider = provider
+        self._pending_provider_config = config
+        self.save_button.setEnabled(False)
+        self.validation_label.setText(_("Testing connection to the selected model..."))
+        self.validation_label.setStyleSheet(
+            f"color: {'#ffffff' if colorMode == 'dark' else '#333333'}; font-size: 14px;"
+        )
+        self.validation_label.show()
+
+        def worker():
+            try:
+                success, message = provider.validate_connection(config)
+            except Exception as exc:
+                success, message = False, f"Connection test failed: {exc}"
+            self.validation_finished.emit(success, message)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    @QtCore.Slot(bool, str)
+    def _finish_provider_validation(self, success, message):
+        self._validation_in_progress = False
+        self.save_button.setEnabled(True)
+        self.validation_label.setText(message)
+        self.validation_label.setStyleSheet(
+            f"color: {'#63d471' if success else '#d93025'}; font-size: 14px; font-weight: bold;"
+        )
+        self.validation_label.show()
+        if success and self._validation_apply_after:
+            self._apply_settings(self._pending_options)
+        elif not success and self._validation_apply_after:
+            QtWidgets.QMessageBox.warning(
+                self,
+                _("AI connection failed"),
+                message + _("\n\nSettings were not saved. Check the credentials and selected model, then try again."),
+            )
+
     def save_settings(self):
-        """Save the current settings."""
+        """Validate changed AI settings, then save all settings."""
+        options = None if self.providers_only else self._build_updated_options()
+        if not self.providers_only and options is None:
+            return
+
+        provider = self.app.providers[self.provider_dropdown.currentIndex()]
+        current_state = self._current_provider_state()
+        must_validate = self.providers_only or current_state != self._initial_provider_state
+        if must_validate:
+            self._start_provider_validation(
+                provider,
+                provider.get_pending_config(),
+                apply_after=True,
+                options=options,
+            )
+            return
+        self._apply_settings(options)
+
+    def _apply_settings(self, options):
         if not self.providers_only:
-            options = self.app.options.copy() if self.app.options else {}
-            for option_name, editors in self.option_prompt_inputs.items():
-                if option_name not in options:
-                    continue
-                option_config = options[option_name]
-                if option_config.get("action") == "read_aloud":
-                    continue
-                option_config["prefix"] = editors["prefix"].text()
-                option_config["instruction"] = editors["instruction"].toPlainText()
             self.app.save_options(options)
 
         self.app.config['locale'] = 'en'

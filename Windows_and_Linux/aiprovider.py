@@ -52,6 +52,13 @@ _OBFUSCATION_PREFIX = "enc:"
 _XOR_KEY = 0x5A  # Simple XOR key for obfuscation
 
 
+class NoWheelComboBox(QtWidgets.QComboBox):
+    """Combo box that ignores wheel-selection changes."""
+
+    def wheelEvent(self, event):
+        event.ignore()
+
+
 def obfuscate_api_key(key: str) -> str:
     """
     Obfuscate an API key using XOR + Base64 encoding.
@@ -176,7 +183,7 @@ class DropdownSetting(AIProviderSetting):
         label = QtWidgets.QLabel(self.display_name)
         label.setStyleSheet(f"font-size: 16px; color: {'#ffffff' if colorMode=='dark' else '#333333'};")
         row_layout.addWidget(label)
-        self.dropdown = QtWidgets.QComboBox()
+        self.dropdown = NoWheelComboBox()
         self.dropdown.setStyleSheet(f"""
             font-size: 16px;
             padding: 5px;
@@ -309,6 +316,14 @@ class AIProvider(ABC):
             config[setting.name] = setting.get_value()
         self.app.config["providers"][self.provider_name] = config
         self.app.save_config(self.app.config)
+
+    def get_pending_config(self):
+        """Return the values currently displayed in the provider settings."""
+        return {setting.name: setting.get_value() for setting in self.settings}
+
+    def validate_connection(self, config: dict):
+        """Verify credentials/model access without changing saved settings."""
+        return False, "Connection testing is not implemented for this provider."
 
     @abstractmethod
     def after_load(self):
@@ -516,6 +531,24 @@ class GeminiProvider(AIProvider):
     def cancel(self):
         self.close_requested = True
 
+    def validate_connection(self, config: dict):
+        try:
+            api_key = deobfuscate_api_key(config.get("api_key", "")).strip()
+            model_name = config.get("model_name", "").strip()
+            if not api_key or not model_name:
+                return False, "Enter a Gemini API key and select a model."
+            client = genai.Client(api_key=api_key)
+            response = client.models.generate_content(
+                model=model_name,
+                contents="Reply with OK.",
+                config=genai_types.GenerateContentConfig(max_output_tokens=8),
+            )
+            if not (response.text or "").strip():
+                return False, "Gemini returned an empty response."
+            return True, f"Connected to {model_name}."
+        except Exception as exc:
+            return False, f"Gemini connection failed: {exc}"
+
 
 class OpenAICompatibleProvider(AIProvider):
     """
@@ -598,6 +631,32 @@ class OpenAICompatibleProvider(AIProvider):
     def cancel(self):
         self.close_requested = True
 
+    def validate_connection(self, config: dict):
+        try:
+            api_key = deobfuscate_api_key(config.get("api_key", "")).strip()
+            api_base = config.get("api_base", "").strip()
+            model = config.get("api_model", "").strip()
+            if not api_key or not api_base or not model:
+                return False, "Enter an API key, API base URL, and model."
+            client = OpenAI(
+                api_key=api_key,
+                base_url=api_base,
+                organization=config.get("api_organisation") or None,
+                project=config.get("api_project") or None,
+                timeout=15.0,
+            )
+            response = client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": "Reply with OK."}],
+                max_tokens=8,
+                stream=False,
+            )
+            if not (response.choices[0].message.content or "").strip():
+                return False, "The model returned an empty response."
+            return True, f"Connected to {model}."
+        except Exception as exc:
+            return False, f"Connection failed: {exc}"
+
 
 class GitHubModelsProvider(OpenAICompatibleProvider):
     """GitHub Models chat completions authenticated with a GitHub PAT."""
@@ -655,6 +714,33 @@ class GitHubModelsProvider(OpenAICompatibleProvider):
             config[setting.name] = value
         self.app.config["providers"][self.provider_name] = config
         self.app.save_config(self.app.config)
+
+    def validate_connection(self, config: dict):
+        try:
+            api_key = deobfuscate_api_key(config.get("api_key", "")).strip()
+            model = config.get("api_model", "").strip()
+            if not api_key or not model:
+                return False, "Enter a GitHub access token and select a model."
+            client = OpenAI(
+                api_key=api_key,
+                base_url=self.API_BASE,
+                timeout=15.0,
+                default_headers={
+                    "Accept": "application/vnd.github+json",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+            )
+            response = client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": "Reply with OK."}],
+                max_tokens=8,
+                stream=False,
+            )
+            if not (response.choices[0].message.content or "").strip():
+                return False, "GitHub Models returned an empty response."
+            return True, f"Connected to {model} through GitHub Models."
+        except Exception as exc:
+            return False, f"GitHub Models connection failed: {exc}"
 
     def after_load(self):
         self.api_base = self.API_BASE
@@ -728,3 +814,15 @@ class OllamaProvider(AIProvider):
 
     def cancel(self):
         self.close_requested = True
+
+    def validate_connection(self, config: dict):
+        try:
+            api_base = config.get("api_base", "").strip()
+            model = config.get("api_model", "").strip()
+            if not api_base or not model:
+                return False, "Enter the Ollama server URL and model."
+            client = OllamaClient(host=api_base, timeout=15.0)
+            client.show(model)
+            return True, f"Connected to Ollama model {model}."
+        except Exception as exc:
+            return False, f"Ollama connection failed: {exc}"

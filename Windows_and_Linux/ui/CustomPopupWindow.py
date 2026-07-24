@@ -467,6 +467,7 @@ class CustomPopupWindow(QtWidgets.QWidget):
         self.close_button = None
         self.custom_input = None
         self.input_area = None
+        self.has_custom_prompt = False
         
         self.button_widgets = []
 
@@ -582,6 +583,7 @@ class CustomPopupWindow(QtWidgets.QWidget):
         
         # Input area (hidden in edit mode)
         self.input_area = QWidget()
+        self.has_custom_prompt = "Custom" in self.load_options()
         input_layout = QHBoxLayout(self.input_area)
         input_layout.setContentsMargins(0,0,0,0)
         
@@ -622,6 +624,7 @@ class CustomPopupWindow(QtWidgets.QWidget):
         input_layout.addWidget(send_btn)
         
         content_layout.addWidget(self.input_area)
+        self.input_area.setVisible(self.has_custom_prompt)
 
         self.build_buttons_list()
         self.rebuild_grid_layout(content_layout)
@@ -636,7 +639,8 @@ class CustomPopupWindow(QtWidgets.QWidget):
         
         logging.debug('CustomPopupWindow UI setup complete')
         self.installEventFilter(self)
-        QtCore.QTimer.singleShot(250, lambda: self.custom_input.setFocus())
+        if self.has_custom_prompt:
+            QtCore.QTimer.singleShot(250, lambda: self.custom_input.setFocus())
 
     @staticmethod
     def load_options():
@@ -862,7 +866,7 @@ class CustomPopupWindow(QtWidgets.QWidget):
             self.edit_button.setIcon(QtGui.QIcon(icon_path))
 
         # Toggle the main input area
-        self.input_area.setVisible(not self.edit_mode)
+        self.input_area.setVisible(not self.edit_mode and self.has_custom_prompt)
 
         # Update button overlays
         for btn in self.button_widgets:
