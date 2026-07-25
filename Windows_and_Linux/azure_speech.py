@@ -58,9 +58,15 @@ class _WindowsMciWavePlayer:
 
     def stop(self) -> None:
         with self._lock:
-            if not self._open:
-                return
-            for command in (f"stop {self.alias}", f"close {self.alias}"):
+            # Issue cleanup commands even when our flag is stale. MCI keeps
+            # playback in the system mixer independently of this Python
+            # object's state, so skipping cleanup can leave audio running
+            # after the control window has closed.
+            for command in (
+                f"stop {self.alias}",
+                f"reset {self.alias}",
+                f"close {self.alias}",
+            ):
                 try:
                     self._command(command)
                 except Exception:
@@ -74,10 +80,11 @@ class _WindowsMciWavePlayer:
         with self._lock:
             if not self._open:
                 return False
-            if self._paused:
+            mode = self._command(f"status {self.alias} mode", 64).lower()
+            if mode == "paused" or self._paused:
                 self._command(f"play {self.alias}")
                 self._paused = False
-            else:
+            elif mode == "playing":
                 self._command(f"pause {self.alias}")
                 self._paused = True
             return self._paused

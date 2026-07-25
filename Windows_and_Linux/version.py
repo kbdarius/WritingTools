@@ -1,4 +1,4 @@
 """Authoritative Windows/Linux Writing Tools version."""
 
-APP_VERSION = "9.12.2"
+APP_VERSION = "9.12.3"
 APP_DISPLAY_NAME = f"Writing Tools v{APP_VERSION}"

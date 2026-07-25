@@ -100,7 +100,8 @@ class SpeechControlWindow(QtWidgets.QWidget):
         self.pause_button.setToolTip("Resume" if paused else "Pause")
 
     def _toggle_pause(self):
-        self.set_paused(self.app.azure_speech.toggle_pause())
+        paused = self.app.azure_speech.toggle_pause()
+        self.set_paused(paused)
 
     def close_without_cancel(self):
         """Close during normal cleanup without sending a second stop request."""
