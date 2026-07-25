@@ -17,6 +17,7 @@ import ui.CustomPopupWindow
 import ui.OnboardingWindow
 import ui.ResponseWindow
 import ui.SettingsWindow
+import ui.SpeechControlWindow
 from aiprovider import GitHubModelsProvider, GeminiProvider, OllamaProvider, OpenAICompatibleProvider, obfuscate_api_key
 from azure_speech import AzureSpeechService
 from local_speech import LocalSpeechService
@@ -1140,24 +1141,12 @@ class WritingToolApp(QtWidgets.QApplication):
         else:
             self._enable_speech_cancel_hotkey()
             if self.speech_progress_dialog is None:
-                dialog = QtWidgets.QProgressDialog('', '', 0, 0)
-                dialog.setWindowTitle('Read Aloud')
-                dialog.setCancelButtonText('Stop')
-                dialog.canceled.connect(self.cancel_read_aloud)
-                dialog.setWindowModality(QtCore.Qt.WindowModality.NonModal)
-                dialog.setMinimumWidth(340)
-                dialog.setAutoClose(False)
-                dialog.setAutoReset(False)
-                dialog.setWindowFlags(
-                    QtCore.Qt.WindowType.Tool
-                    | QtCore.Qt.WindowType.WindowStaysOnTopHint
-                    | QtCore.Qt.WindowType.WindowDoesNotAcceptFocus
-                )
-                dialog.setAttribute(QtCore.Qt.WidgetAttribute.WA_ShowWithoutActivating)
-                self.speech_progress_dialog = dialog
-            self.speech_progress_dialog.setLabelText(
-                f'{message}\n\nPress Esc to stop.'
-            )
+                self.speech_progress_dialog = ui.SpeechControlWindow.SpeechControlWindow(self)
+                self.speech_progress_dialog.show_near_cursor()
+            if message.startswith('Reading with Azure Speech'):
+                self.speech_progress_dialog.set_playing(message)
+            else:
+                self.speech_progress_dialog.set_preparing(message)
             self.speech_progress_dialog.show()
 
         if self.tray_icon:
@@ -1180,11 +1169,7 @@ class WritingToolApp(QtWidgets.QApplication):
         if self.speech_progress_dialog is not None:
             dialog = self.speech_progress_dialog
             self.speech_progress_dialog = None
-            # Closing a QProgressDialog emits canceled(). Block that signal so
-            # normal completion and error cleanup are not logged as if the
-            # user pressed Escape or clicked Stop.
-            dialog.blockSignals(True)
-            dialog.close()
+            dialog.close_without_cancel()
             dialog.deleteLater()
 
     def show_response_window(self, option, text):

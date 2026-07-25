@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import html
+import ctypes
 import logging
 import os
 import sys
@@ -19,6 +20,84 @@ from speech_metrics import SpeechMetricsRecorder
 
 StatusCallback = Optional[Callable[[str], None]]
 ErrorCallback = Optional[Callable[[str], None]]
+
+
+class _WindowsMciWavePlayer:
+    """Small Windows WAV player with pause and seek support."""
+
+    def __init__(self) -> None:
+        self.alias = f"writingtoolsazure{os.getpid()}"
+        self._lock = threading.RLock()
+        self._open = False
+        self._paused = False
+
+    def _command(self, command: str, result_size: int = 0) -> str:
+        buffer = ctypes.create_unicode_buffer(result_size) if result_size else None
+        error = ctypes.windll.winmm.mciSendStringW(
+            command, buffer, result_size, None
+        )
+        if error:
+            message = ctypes.create_unicode_buffer(256)
+            ctypes.windll.winmm.mciGetErrorStringW(error, message, len(message))
+            raise RuntimeError(f"Windows audio control failed: {message.value or error}")
+        return buffer.value if buffer is not None else ""
+
+    def play(self, audio_path: Path) -> None:
+        with self._lock:
+            self.stop()
+            # Also close any stale alias left by an interrupted prior process.
+            try:
+                self._command(f"close {self.alias}")
+            except Exception:
+                pass
+            self._command(f'open "{audio_path}" type waveaudio alias {self.alias}')
+            self._open = True
+            self._command(f"set {self.alias} time format milliseconds")
+            self._command(f"play {self.alias}")
+            self._paused = False
+
+    def stop(self) -> None:
+        with self._lock:
+            if not self._open:
+                return
+            for command in (f"stop {self.alias}", f"close {self.alias}"):
+                try:
+                    self._command(command)
+                except Exception:
+                    logging.debug(
+                        "Azure MCI cleanup command failed: %s", command, exc_info=True
+                    )
+            self._open = False
+            self._paused = False
+
+    def toggle_pause(self) -> bool:
+        with self._lock:
+            if not self._open:
+                return False
+            if self._paused:
+                self._command(f"play {self.alias}")
+                self._paused = False
+            else:
+                self._command(f"pause {self.alias}")
+                self._paused = True
+            return self._paused
+
+    def seek_relative(self, milliseconds: int) -> None:
+        with self._lock:
+            if not self._open:
+                return
+            position = int(self._command(f"status {self.alias} position", 64))
+            length = int(self._command(f"status {self.alias} length", 64))
+            target = max(0, min(length, position + milliseconds))
+            self._command(f"seek {self.alias} to {target}")
+            if not self._paused:
+                self._command(f"play {self.alias}")
+
+    def is_finished(self) -> bool:
+        with self._lock:
+            if not self._open:
+                return True
+            return self._command(f"status {self.alias} mode", 64).lower() == "stopped"
 
 
 class AzureSpeechService:
@@ -38,6 +117,7 @@ class AzureSpeechService:
         self.audio_dir = Path(local_app_data) / "Writing Tools" / "azure-speech"
         self._state_lock = threading.Lock()
         self._request_id = 0
+        self._player = _WindowsMciWavePlayer() if sys.platform.startswith("win") else None
         self.metrics = SpeechMetricsRecorder()
 
     def speak(
@@ -65,8 +145,6 @@ class AzureSpeechService:
                     "Azure Speech is not configured. Add the Speech resource region in Settings > General."
                 )
 
-            import winsound
-
             chunks = self._chunk_text(text)
             record["provider"] = "azure"
             record["chunk_count"] = len(chunks)
@@ -81,7 +159,9 @@ class AzureSpeechService:
                     return
                 self._notify(status_callback, "Preparing Azure speech...")
                 synthesis_started = time.perf_counter()
-                audio_path = self.audio_dir / f"read-aloud-{index % 2}.wav"
+                audio_path = self.audio_dir / (
+                    f"read-aloud-{os.getpid()}-{request_id}-{index}.wav"
+                )
                 request_metrics = self._synthesize(
                     chunk, key, region, audio_path, self._voice_for(text)
                 )
@@ -94,18 +174,23 @@ class AzureSpeechService:
                     return
                 audio_seconds = self._audio_duration(audio_path)
                 total_audio_seconds += audio_seconds
-                winsound.PlaySound(
-                    str(audio_path),
-                    winsound.SND_FILENAME | winsound.SND_ASYNC | winsound.SND_NODEFAULT,
-                )
+                self._player.play(audio_path)
                 if playback_started is None:
                     playback_started = time.perf_counter()
                     record["first_chunk_synthesis_ms"] = chunk_synthesis_ms
                     record["time_to_audio_ms"] = self._elapsed_ms(started)
                 self._notify(status_callback, "Reading with Azure Speech...")
-                deadline = time.monotonic() + audio_seconds
-                while self._is_current(request_id) and time.monotonic() < deadline:
+                while self._is_current(request_id) and not self._player.is_finished():
                     time.sleep(0.05)
+                self._player.stop()
+                try:
+                    audio_path.unlink(missing_ok=True)
+                except OSError:
+                    logging.debug(
+                        "Could not remove temporary Azure audio: %s",
+                        audio_path,
+                        exc_info=True,
+                    )
 
             if self._is_current(request_id):
                 record["synthesis_ms"] = round(total_synthesis_ms, 2)
@@ -127,6 +212,8 @@ class AzureSpeechService:
     def stop(self) -> None:
         with self._state_lock:
             self._request_id += 1
+        if self._player is not None:
+            self._player.stop()
         if sys.platform.startswith("win"):
             try:
                 import winsound
@@ -134,6 +221,13 @@ class AzureSpeechService:
                 winsound.PlaySound(None, 0)
             except Exception:
                 logging.debug("No active Azure Read Aloud playback", exc_info=True)
+
+    def toggle_pause(self) -> bool:
+        return self._player.toggle_pause() if self._player is not None else False
+
+    def seek_relative(self, milliseconds: int) -> None:
+        if self._player is not None:
+            self._player.seek_relative(milliseconds)
 
     def test_connection(self, key: str, region: str) -> None:
         """Synthesize and play a short sample, raising on any connection error."""
