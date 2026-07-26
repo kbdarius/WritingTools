@@ -392,6 +392,11 @@ class ResponseWindow(QtWidgets.QWidget):
         copy_md_btn.clicked.connect(self.copy_first_response)  # Updated to only copy first response
         copy_bar.addWidget(copy_md_btn)
 
+        read_aloud_btn = QtWidgets.QPushButton(_("Read Aloud"))
+        read_aloud_btn.setStyleSheet(self.get_button_style())
+        read_aloud_btn.clicked.connect(self.read_aloud_current_response)
+        copy_bar.addWidget(read_aloud_btn)
+
         insert_btn = QtWidgets.QPushButton(_("Insert at cursor"))
         insert_btn.setStyleSheet(self.get_button_style())
         insert_btn.setToolTip("Close this result and paste it where your cursor was")
@@ -495,11 +500,44 @@ class ResponseWindow(QtWidgets.QWidget):
         if response_text:
             QtWidgets.QApplication.clipboard().setText(response_text)
 
+    def read_aloud_current_response(self):
+        """Read the most recent assistant response aloud."""
+        response_text = self.get_latest_assistant_response()
+        if not response_text:
+            return
+        try:
+            self.app.local_speech.speak(
+                response_text,
+                status_callback=self.app.speech_status_signal.emit,
+                error_callback=self.app.speech_error_signal.emit,
+                metrics_context={"source": "response_window", "option": self.option},
+            )
+        except Exception as e:
+            logging.error(f"Failed to start Read Aloud from response window: {e}")
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Read Aloud Error",
+                "Could not start Read Aloud from response window."
+            )
+
     def insert_first_response(self):
         """Return focus to the previous app and replace its selection/cursor."""
         response_text = self.get_first_response_text()
         if response_text:
             self.app.insert_text_at_cursor(response_text, self)
+
+    def get_latest_assistant_response(self):
+        """Get the latest assistant response in chat history."""
+        try:
+            if not self.chat_history:
+                return None
+            for msg in reversed(self.chat_history):
+                if msg["role"] == "assistant":
+                    return msg["content"]
+            return None
+        except Exception as e:
+            logging.error(f"Error getting latest response: {e}")
+            return None
 
     def get_button_style(self):
         return f"""

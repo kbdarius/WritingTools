@@ -1066,7 +1066,9 @@ class WritingToolApp(QtWidgets.QApplication):
         # the target app until the user explicitly clicks "Insert at cursor"
         # in the result window. Individual window-mode actions still open a
         # window even when the global review setting is disabled.
+        rewrite_option = option == "Rewrite"
         show_in_window = (
+            rewrite_option or
             self.options[option].get('open_in_window', False)
             or self.config.get('review_before_insert', True)
         )
