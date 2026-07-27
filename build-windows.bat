@@ -60,6 +60,7 @@ copy /y "dist\%EXE_NAME%" "%~dp0%EXE_NAME%" >nul
 if errorlevel 1 goto :failed
 
 echo [6/6] Replacing the previous version and starting the new build...
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Write-Host \"[6/6] Cleaning up any previous Writing Tools v*.exe instances before launching new binary\""
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0Windows_and_Linux\finalize-windows-build.ps1" -RepoRoot "%~dp0." -ExeName "%EXE_NAME%"
 if errorlevel 1 goto :failed
 

@@ -34,6 +34,7 @@ foreach ($oldExecutable in $oldExecutables) {
 }
 
 if ($oldPaths.Count -gt 0) {
+    Write-Host "Removing old versioned Writing Tools executables..."
     $oldProcesses = @(
         Get-CimInstance Win32_Process |
             Where-Object { $_.ExecutablePath -and $oldPaths.Contains($_.ExecutablePath) }
@@ -54,8 +55,11 @@ if ($oldPaths.Count -gt 0) {
         Remove-Item -LiteralPath $oldExecutable.FullName -Force
         Write-Host "Deleted old executable: $($oldExecutable.Name)"
     }
+} else {
+    Write-Host "No previous versioned Executable found to remove."
 }
 
+Write-Host "Launching latest executable: $ExeName..."
 Write-Host "Starting $ExeName..."
 Start-Process -FilePath $newExePath -WorkingDirectory $resolvedRepoRoot -WindowStyle Hidden
 Start-Sleep -Seconds 4
