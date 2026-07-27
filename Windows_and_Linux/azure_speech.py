@@ -6,6 +6,7 @@ import html
 import ctypes
 import logging
 import os
+import queue
 import sys
 import threading
 import time
@@ -30,6 +31,8 @@ class _WindowsMciWavePlayer:
         self._lock = threading.RLock()
         self._open = False
         self._paused = False
+        self._owner_thread_id: Optional[int] = None
+        self._control_requests: queue.Queue[dict] = queue.Queue()
 
     def _command(self, command: str, result_size: int = 0) -> str:
         buffer = ctypes.create_unicode_buffer(result_size) if result_size else None
@@ -45,6 +48,9 @@ class _WindowsMciWavePlayer:
     def play(self, audio_path: Path) -> None:
         with self._lock:
             self.stop()
+            # MCI string aliases belong to the thread that opens them. All
+            # later playback commands must be executed by this same thread.
+            self._owner_thread_id = threading.get_ident()
             # Also close any stale alias left by an interrupted prior process.
             try:
                 self._command(f"close {self.alias}")
@@ -58,53 +64,126 @@ class _WindowsMciWavePlayer:
 
     def stop(self) -> None:
         with self._lock:
-            # Issue cleanup commands even when our flag is stale. MCI keeps
-            # playback in the system mixer independently of this Python
-            # object's state, so skipping cleanup can leave audio running
-            # after the control window has closed.
-            for command in (
-                f"stop {self.alias}",
-                f"reset {self.alias}",
-                f"close {self.alias}",
-            ):
-                try:
-                    self._command(command)
-                except Exception:
-                    logging.debug(
-                        "Azure MCI cleanup command failed: %s", command, exc_info=True
-                    )
+            is_owner = self._owner_thread_id in (None, threading.get_ident())
+            if is_owner:
+                # Issue cleanup commands even when our flag is stale. MCI
+                # keeps playback in the system mixer independently of this
+                # object's state, so skipping cleanup can leave audio running.
+                for command in (
+                    f"stop {self.alias}",
+                    f"reset {self.alias}",
+                    f"close {self.alias}",
+                ):
+                    try:
+                        self._command(command)
+                    except Exception:
+                        logging.debug(
+                            "Azure MCI cleanup command failed: %s",
+                            command,
+                            exc_info=True,
+                        )
             self._open = False
             self._paused = False
+            if is_owner:
+                self._owner_thread_id = None
+                self._finish_pending_controls_locked()
 
     def toggle_pause(self) -> bool:
         with self._lock:
             if not self._open:
                 return False
-            mode = self._command(f"status {self.alias} mode", 64).lower()
-            if mode == "paused" or self._paused:
-                self._command(f"play {self.alias}")
-                self._paused = False
-            elif mode == "playing":
-                self._command(f"pause {self.alias}")
-                self._paused = True
-            return self._paused
+            if self._owner_thread_id == threading.get_ident():
+                return self._toggle_pause_locked()
+        return bool(self._submit_control("toggle_pause", default=False))
 
     def seek_relative(self, milliseconds: int) -> None:
         with self._lock:
             if not self._open:
                 return
-            position = int(self._command(f"status {self.alias} position", 64))
-            length = int(self._command(f"status {self.alias} length", 64))
-            target = max(0, min(length, position + milliseconds))
-            self._command(f"seek {self.alias} to {target}")
-            if not self._paused:
-                self._command(f"play {self.alias}")
+            if self._owner_thread_id == threading.get_ident():
+                self._seek_relative_locked(milliseconds)
+                return
+        self._submit_control("seek_relative", milliseconds, default=None)
 
     def is_finished(self) -> bool:
         with self._lock:
+            self._process_control_requests_locked()
             if not self._open:
                 return True
             return self._command(f"status {self.alias} mode", 64).lower() == "stopped"
+
+    def _toggle_pause_locked(self) -> bool:
+        mode = self._command(f"status {self.alias} mode", 64).lower()
+        if mode == "paused" or self._paused:
+            self._command(f"play {self.alias}")
+            self._paused = False
+            logging.info("Azure Read Aloud resumed")
+        elif mode == "playing":
+            self._command(f"pause {self.alias}")
+            self._paused = True
+            logging.info("Azure Read Aloud paused")
+        return self._paused
+
+    def _seek_relative_locked(self, milliseconds: int) -> None:
+        position = int(self._command(f"status {self.alias} position", 64))
+        length = int(self._command(f"status {self.alias} length", 64))
+        target = max(0, min(length, position + milliseconds))
+        self._command(f"seek {self.alias} to {target}")
+        # MCI changes the device mode to "stopped" after seek. Restart from
+        # the new position, then restore paused state when the user sought
+        # while paused so the playback loop does not mistake it for EOF.
+        self._command(f"play {self.alias}")
+        if self._paused:
+            self._command(f"pause {self.alias}")
+        logging.info(
+            "Azure Read Aloud seeked from %d ms to %d ms", position, target
+        )
+
+    def _submit_control(self, action: str, value=None, default=None):
+        """Run a control on the MCI owner thread and return its result."""
+        request = {
+            "action": action,
+            "value": value,
+            "event": threading.Event(),
+            "result": default,
+            "error": None,
+        }
+        self._control_requests.put(request)
+        if not request["event"].wait(timeout=1.0):
+            logging.error("Timed out waiting for Azure playback control: %s", action)
+            return default
+        if request["error"] is not None:
+            raise request["error"]
+        return request["result"]
+
+    def _process_control_requests_locked(self) -> None:
+        """Execute button requests on the thread that opened the MCI alias."""
+        while True:
+            try:
+                request = self._control_requests.get_nowait()
+            except queue.Empty:
+                return
+            try:
+                if not self._open:
+                    request["result"] = False
+                elif request["action"] == "toggle_pause":
+                    request["result"] = self._toggle_pause_locked()
+                elif request["action"] == "seek_relative":
+                    self._seek_relative_locked(int(request["value"]))
+            except Exception as exc:
+                request["error"] = exc
+            finally:
+                request["event"].set()
+
+    def _finish_pending_controls_locked(self) -> None:
+        """Release any button handlers still waiting when playback closes."""
+        while True:
+            try:
+                request = self._control_requests.get_nowait()
+            except queue.Empty:
+                return
+            request["result"] = False
+            request["event"].set()
 
 
 class AzureSpeechService:
