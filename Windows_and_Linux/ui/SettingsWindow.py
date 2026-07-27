@@ -295,89 +295,6 @@ class SettingsWindow(QtWidgets.QWidget):
             )
             content_layout.addWidget(self.review_before_insert_checkbox)
 
-            read_aloud_label = QtWidgets.QLabel(_("Read Aloud Voice:"))
-            read_aloud_label.setStyleSheet(
-                f"font-size: 16px; color: {'#ffffff' if colorMode == 'dark' else '#333333'};"
-            )
-            content_layout.addWidget(read_aloud_label)
-
-            self.read_aloud_provider_dropdown = NoWheelComboBox()
-            self.read_aloud_provider_dropdown.addItem(_("Microsoft Azure Speech"), "azure")
-            self.read_aloud_provider_dropdown.setToolTip(
-                _("Azure Speech is temporarily the only available Read Aloud provider.")
-            )
-            self.read_aloud_provider_dropdown.setStyleSheet(f"""
-                font-size: 16px;
-                padding: 5px;
-                background-color: {'#444' if colorMode == 'dark' else 'white'};
-                color: {'#ffffff' if colorMode == 'dark' else '#000000'};
-                border: 1px solid {'#666' if colorMode == 'dark' else '#ccc'};
-            """)
-            content_layout.addWidget(self.read_aloud_provider_dropdown)
-
-            azure_settings = self.app.config.get('azure_speech', {})
-            azure_key_label = QtWidgets.QLabel(_("Azure Speech resource key:"))
-            azure_key_label.setStyleSheet(
-                f"font-size: 16px; color: {'#ffffff' if colorMode == 'dark' else '#333333'};"
-            )
-            content_layout.addWidget(azure_key_label)
-            self.azure_speech_key_input = QtWidgets.QLineEdit(azure_settings.get('key', ''))
-            self.azure_speech_key_input.setEchoMode(QtWidgets.QLineEdit.EchoMode.Password)
-            self.azure_speech_key_input.setPlaceholderText(_("Paste the key from your Azure Speech resource"))
-            content_layout.addWidget(self.azure_speech_key_input)
-
-            azure_region_label = QtWidgets.QLabel(_("Azure Speech region:"))
-            azure_region_label.setStyleSheet(
-                f"font-size: 16px; color: {'#ffffff' if colorMode == 'dark' else '#333333'};"
-            )
-            content_layout.addWidget(azure_region_label)
-            self.azure_speech_region_input = QtWidgets.QLineEdit(
-                azure_settings.get('region', 'eastus')
-            )
-            self.azure_speech_region_input.setPlaceholderText(_("For example: eastus"))
-            content_layout.addWidget(self.azure_speech_region_input)
-
-            azure_voice_label = QtWidgets.QLabel(_("English Read Aloud voice:"))
-            azure_voice_label.setStyleSheet(
-                f"font-size: 16px; color: {'#ffffff' if colorMode == 'dark' else '#333333'};"
-            )
-            content_layout.addWidget(azure_voice_label)
-            self.azure_voice_dropdown = NoWheelComboBox()
-            for voice_name, voice_id in AzureSpeechService.ENGLISH_VOICES:
-                self.azure_voice_dropdown.addItem(voice_name, voice_id)
-            saved_voice = AzureSpeechService._normalize_english_voice(
-                azure_settings.get('voice')
-            )
-            saved_voice_index = self.azure_voice_dropdown.findData(saved_voice)
-            self.azure_voice_dropdown.setCurrentIndex(max(0, saved_voice_index))
-            self.azure_voice_dropdown.setToolTip(
-                _("Choose the Azure voice used for English. Persian text still uses Dilara automatically.")
-            )
-            self.azure_voice_dropdown.setStyleSheet(f"""
-                font-size: 16px;
-                padding: 5px;
-                background-color: {'#444' if colorMode == 'dark' else 'white'};
-                color: {'#ffffff' if colorMode == 'dark' else '#000000'};
-                border: 1px solid {'#666' if colorMode == 'dark' else '#ccc'};
-            """)
-            content_layout.addWidget(self.azure_voice_dropdown)
-
-            persian_voice_note = QtWidgets.QLabel(
-                _("Persian/Farsi text automatically uses Dilara; this English selection does not replace it.")
-            )
-            persian_voice_note.setWordWrap(True)
-            persian_voice_note.setStyleSheet(
-                f"font-size: 13px; color: {'#cccccc' if colorMode == 'dark' else '#555555'};"
-            )
-            content_layout.addWidget(persian_voice_note)
-
-            self.azure_test_button = QtWidgets.QPushButton(_("\u25b6  Test selected voice"))
-            self.azure_test_button.setToolTip(
-                _("Connect to Azure and play a short sample of the highlighted English voice.")
-            )
-            self.azure_test_button.clicked.connect(self.test_azure_speech)
-            content_layout.addWidget(self.azure_test_button)
-
             # Prompt management lives on its own tab.
             content_layout = prompts_layout
             ai_prompt_label = QtWidgets.QLabel(_("AI Button Prompts"))
@@ -484,6 +401,98 @@ class SettingsWindow(QtWidgets.QWidget):
 
         # Provider controls live on the AI Provider tab.
         content_layout = ai_layout
+        read_aloud_label = QtWidgets.QLabel(_("Read Aloud"))
+        read_aloud_label.setStyleSheet(
+            f"font-size: 18px; font-weight: bold; color: {'#ffffff' if colorMode == 'dark' else '#333333'};"
+        )
+        content_layout.addWidget(read_aloud_label)
+
+        read_aloud_intro = QtWidgets.QLabel(
+            _("Configure the voice provider used for Read Aloud and its speech credentials.")
+        )
+        read_aloud_intro.setWordWrap(True)
+        read_aloud_intro.setStyleSheet(
+            f"font-size: 14px; color: {'#cccccc' if colorMode == 'dark' else '#555555'};"
+        )
+        content_layout.addWidget(read_aloud_intro)
+
+        self.read_aloud_provider_dropdown = NoWheelComboBox()
+        self.read_aloud_provider_dropdown.addItem(_("Microsoft Azure Speech"), "azure")
+        self.read_aloud_provider_dropdown.setToolTip(
+            _("Azure Speech is temporarily the only available Read Aloud provider.")
+        )
+        self.read_aloud_provider_dropdown.setStyleSheet(f"""
+            font-size: 16px;
+            padding: 5px;
+            background-color: {'#444' if colorMode == 'dark' else 'white'};
+            color: {'#ffffff' if colorMode == 'dark' else '#000000'};
+            border: 1px solid {'#666' if colorMode == 'dark' else '#ccc'};
+        """)
+        content_layout.addWidget(self.read_aloud_provider_dropdown)
+
+        azure_settings = self.app.config.get('azure_speech', {})
+        azure_key_label = QtWidgets.QLabel(_("Azure Speech resource key:"))
+        azure_key_label.setStyleSheet(
+            f"font-size: 16px; color: {'#ffffff' if colorMode == 'dark' else '#333333'};"
+        )
+        content_layout.addWidget(azure_key_label)
+        self.azure_speech_key_input = QtWidgets.QLineEdit(azure_settings.get('key', ''))
+        self.azure_speech_key_input.setEchoMode(QtWidgets.QLineEdit.EchoMode.Password)
+        self.azure_speech_key_input.setPlaceholderText(_("Paste the key from your Azure Speech resource"))
+        content_layout.addWidget(self.azure_speech_key_input)
+
+        azure_region_label = QtWidgets.QLabel(_("Azure Speech region:"))
+        azure_region_label.setStyleSheet(
+            f"font-size: 16px; color: {'#ffffff' if colorMode == 'dark' else '#333333'};"
+        )
+        content_layout.addWidget(azure_region_label)
+        self.azure_speech_region_input = QtWidgets.QLineEdit(
+            azure_settings.get('region', 'eastus')
+        )
+        self.azure_speech_region_input.setPlaceholderText(_("For example: eastus"))
+        content_layout.addWidget(self.azure_speech_region_input)
+
+        azure_voice_label = QtWidgets.QLabel(_("English Read Aloud voice:"))
+        azure_voice_label.setStyleSheet(
+            f"font-size: 16px; color: {'#ffffff' if colorMode == 'dark' else '#333333'};"
+        )
+        content_layout.addWidget(azure_voice_label)
+        self.azure_voice_dropdown = NoWheelComboBox()
+        for voice_name, voice_id in AzureSpeechService.ENGLISH_VOICES:
+            self.azure_voice_dropdown.addItem(voice_name, voice_id)
+        saved_voice = AzureSpeechService._normalize_english_voice(
+            azure_settings.get('voice')
+        )
+        saved_voice_index = self.azure_voice_dropdown.findData(saved_voice)
+        self.azure_voice_dropdown.setCurrentIndex(max(0, saved_voice_index))
+        self.azure_voice_dropdown.setToolTip(
+            _("Choose the Azure voice used for English. Persian text still uses Dilara automatically.")
+        )
+        self.azure_voice_dropdown.setStyleSheet(f"""
+            font-size: 16px;
+            padding: 5px;
+            background-color: {'#444' if colorMode == 'dark' else 'white'};
+            color: {'#ffffff' if colorMode == 'dark' else '#000000'};
+            border: 1px solid {'#666' if colorMode == 'dark' else '#ccc'};
+        """)
+        content_layout.addWidget(self.azure_voice_dropdown)
+
+        persian_voice_note = QtWidgets.QLabel(
+            _("Persian/Farsi text automatically uses Dilara; this English selection does not replace it.")
+        )
+        persian_voice_note.setWordWrap(True)
+        persian_voice_note.setStyleSheet(
+            f"font-size: 13px; color: {'#cccccc' if colorMode == 'dark' else '#555555'};"
+        )
+        content_layout.addWidget(persian_voice_note)
+
+        self.azure_test_button = QtWidgets.QPushButton(_("\u25b6  Test selected voice"))
+        self.azure_test_button.setToolTip(
+            _("Connect to Azure and play a short sample of the highlighted English voice.")
+        )
+        self.azure_test_button.clicked.connect(self.test_azure_speech)
+        content_layout.addWidget(self.azure_test_button)
+
         # Add provider selection
         provider_label = QtWidgets.QLabel(_("Choose AI Provider:"))
         provider_label.setStyleSheet(f"font-size: 16px; color: {'#ffffff' if colorMode == 'dark' else '#333333'};")

@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from ui.UIUtils import ThemeBackground, colorMode
-from version import APP_DISPLAY_NAME
+from version import APP_DISPLAY_NAME, APP_VERSION
 
 _ = lambda x: x
 
@@ -479,6 +479,8 @@ class CustomPopupWindow(QtWidgets.QWidget):
         self.setWindowFlags(QtCore.Qt.WindowStaysOnTopHint | QtCore.Qt.FramelessWindowHint)
         self.setAttribute(QtCore.Qt.WA_TranslucentBackground)
         self.setWindowTitle(APP_DISPLAY_NAME)
+        self._drag_active = False
+        self._drag_offset = QtCore.QPoint()
         
         main_layout = QtWidgets.QVBoxLayout(self)
         main_layout.setContentsMargins(0,0,0,0)
@@ -535,6 +537,17 @@ class CustomPopupWindow(QtWidgets.QWidget):
         self.drag_label.setAlignment(Qt.AlignCenter)
         self.drag_label.hide()
         top_bar.addWidget(self.drag_label, 1, Qt.AlignVCenter | Qt.AlignHCenter)
+
+        version_label = QLabel(f"v{APP_VERSION}")
+        version_label.setStyleSheet(f"""
+            color: {'#aaa' if colorMode=='dark' else '#666'};
+            font-size: 11px;
+            font-weight: bold;
+            padding-top: 2px;
+            padding-right: 6px;
+        """)
+        version_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        top_bar.addWidget(version_label, 0, Qt.AlignVCenter | Qt.AlignRight)
 
         # The "Reset" button (edit-mode only) - also 24x24
         self.reset_button = QPushButton()
@@ -641,6 +654,29 @@ class CustomPopupWindow(QtWidgets.QWidget):
         self.installEventFilter(self)
         if self.has_custom_prompt:
             QtCore.QTimer.singleShot(250, lambda: self.custom_input.setFocus())
+
+    def mousePressEvent(self, event):
+        if event.button() == QtCore.Qt.LeftButton:
+            pos = event.position().toPoint()
+            child = self.childAt(pos)
+            if child is None or child is self.background:
+                self._drag_active = True
+                self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._drag_active and (event.buttons() & QtCore.Qt.LeftButton):
+            self.move(event.globalPosition().toPoint() - self._drag_offset)
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == QtCore.Qt.LeftButton:
+            self._drag_active = False
+        super().mouseReleaseEvent(event)
 
     @staticmethod
     def load_options():

@@ -1,6 +1,7 @@
 """Compact, non-activating controls for Read Aloud playback."""
 
 from PySide6 import QtCore, QtGui, QtWidgets
+from version import APP_VERSION
 
 
 class SpeechControlWindow(QtWidgets.QWidget):
@@ -8,6 +9,8 @@ class SpeechControlWindow(QtWidgets.QWidget):
         super().__init__()
         self.app = app
         self._closing_from_app = False
+        self._drag_active = False
+        self._drag_offset = QtCore.QPoint()
         self.setWindowTitle("Read Aloud")
         self.setWindowFlags(
             QtCore.Qt.WindowType.Tool
@@ -63,6 +66,12 @@ class SpeechControlWindow(QtWidgets.QWidget):
         ):
             layout.addWidget(button)
 
+        self.version_label = QtWidgets.QLabel(f"v{APP_VERSION}")
+        self.version_label.setStyleSheet(
+            "color: #888; font-size: 10px; font-weight: bold; padding-left: 4px; padding-right: 2px;"
+        )
+        layout.addWidget(self.version_label)
+
         self.setStyleSheet(
             "SpeechControlWindow { background: #ffffff; border: 1px solid #b8b8b8; "
             "border-radius: 6px; }"
@@ -72,6 +81,7 @@ class SpeechControlWindow(QtWidgets.QWidget):
             "QToolButton:disabled { opacity: 0.4; }"
         )
         self.set_preparing("Preparing speech...")
+        self.setCursor(QtCore.Qt.CursorShape.OpenHandCursor)
 
     def _button(self, icon, tooltip, callback):
         button = QtWidgets.QToolButton()
@@ -141,3 +151,27 @@ class SpeechControlWindow(QtWidgets.QWidget):
         y = min(max(cursor.y() + 14, available.top()), available.bottom() - self.height())
         self.move(x, y)
         self.show()
+
+    def mousePressEvent(self, event):
+        if event.button() == QtCore.Qt.MouseButton.LeftButton:
+            child = self.childAt(event.position().toPoint())
+            if child is None or child is self:
+                self._drag_active = True
+                self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+                self.setCursor(QtCore.Qt.CursorShape.ClosedHandCursor)
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._drag_active and (event.buttons() & QtCore.Qt.MouseButton.LeftButton):
+            self.move(event.globalPosition().toPoint() - self._drag_offset)
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == QtCore.Qt.MouseButton.LeftButton:
+            self._drag_active = False
+            self.setCursor(QtCore.Qt.CursorShape.OpenHandCursor)
+        super().mouseReleaseEvent(event)
