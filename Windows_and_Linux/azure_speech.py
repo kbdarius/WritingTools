@@ -7,6 +7,7 @@ import ctypes
 import logging
 import os
 import queue
+import re
 import sys
 import threading
 import time
@@ -196,6 +197,7 @@ class AzureSpeechService:
     DEFAULT_REGION = "eastus"
     ENGLISH_VOICE = "en-US-JennyNeural"
     PERSIAN_VOICE = "fa-IR-DilaraNeural"
+    SUPPORTED_RATES = (0.75, 1.0, 1.25, 1.5, 2.0)
 
     def __init__(self, config: dict) -> None:
         self.config = config
@@ -204,6 +206,12 @@ class AzureSpeechService:
         self._state_lock = threading.Lock()
         self._request_id = 0
         self._player = _WindowsMciWavePlayer() if sys.platform.startswith("win") else None
+        self._navigation_lock = threading.Lock()
+        self._active_request_id: Optional[int] = None
+        self._sentences: list[str] = []
+        self._sentence_index = 0
+        self._requested_sentence: Optional[int] = None
+        self._rate = self._normalize_rate(config.get("read_aloud_rate", 1.0))
         self.metrics = SpeechMetricsRecorder()
 
     def speak(
@@ -217,12 +225,17 @@ class AzureSpeechService:
         started = time.perf_counter()
         record = self.metrics.new_record(text, metrics_context)
         outcome = "canceled"
+        session_done = threading.Event()
+        cache_lock = threading.Lock()
+        audio_cache: dict[tuple[int, float], dict] = {}
+        in_flight: dict[tuple[int, float], dict] = {}
+        synthesis_measurements: list[dict] = []
         try:
             if not sys.platform.startswith("win"):
                 raise RuntimeError("Azure Read Aloud is currently available on Windows only.")
 
-            key, region = self._credentials()
-            if not key:
+            speech_key, region = self._credentials()
+            if not speech_key:
                 raise RuntimeError(
                     "Azure Speech is not configured. Add the Speech resource key in Settings > General."
                 )
@@ -235,52 +248,150 @@ class AzureSpeechService:
             record["provider"] = "azure"
             record["chunk_count"] = len(chunks)
             record["voice"] = self._voice_for(text)
+            record["sentence_count"] = len(chunks)
             playback_started = None
-            total_synthesis_ms = 0.0
             total_audio_seconds = 0.0
 
+            with self._navigation_lock:
+                self._active_request_id = request_id
+                self._sentences = chunks
+                self._sentence_index = 0
+                self._requested_sentence = None
+
+            def ensure_audio(index: int, rate: float) -> Optional[dict]:
+                """Synthesize once per sentence/rate and share prefetch results."""
+                cache_key = (index, rate)
+                with cache_lock:
+                    cached = audio_cache.get(cache_key)
+                    if cached is not None:
+                        return cached
+                    pending = in_flight.get(cache_key)
+                    producer = pending is None
+                    if producer:
+                        pending = {
+                            "event": threading.Event(),
+                            "result": None,
+                            "error": None,
+                        }
+                        in_flight[cache_key] = pending
+
+                if producer:
+                    rate_token = int(round(rate * 100))
+                    audio_path = self.audio_dir / (
+                        f"read-aloud-{os.getpid()}-{request_id}-{index}-{rate_token}.wav"
+                    )
+                    synthesis_started = time.perf_counter()
+                    try:
+                        request_metrics = self._synthesize(
+                            chunks[index],
+                            speech_key,
+                            region,
+                            audio_path,
+                            self._voice_for(text),
+                            rate=rate,
+                        )
+                        result = {
+                            "path": audio_path,
+                            "duration": self._audio_duration(audio_path),
+                            "synthesis_ms": self._elapsed_ms(synthesis_started),
+                            "request_metrics": request_metrics,
+                        }
+                        with cache_lock:
+                            synthesis_measurements.append(result)
+                            if session_done.is_set():
+                                try:
+                                    audio_path.unlink(missing_ok=True)
+                                except OSError:
+                                    logging.debug(
+                                        "Could not remove canceled Azure prefetch audio",
+                                        exc_info=True,
+                                    )
+                            else:
+                                audio_cache[cache_key] = result
+                            pending["result"] = result
+                    except Exception as exc:
+                        pending["error"] = exc
+                    finally:
+                        pending["event"].set()
+                else:
+                    while not pending["event"].wait(timeout=0.1):
+                        if not self._is_current(request_id):
+                            return None
+
+                if pending["error"] is not None:
+                    raise pending["error"]
+                return pending["result"]
+
+            def prefetch(index: int, rate: float) -> None:
+                if index >= len(chunks):
+                    return
+                thread = threading.Thread(
+                    target=ensure_audio,
+                    args=(index, rate),
+                    daemon=True,
+                    name=f"WritingToolsAzurePrefetch{index}",
+                )
+                thread.start()
+
             self._notify(status_callback, "Connecting to Azure Speech...")
-            for index, chunk in enumerate(chunks):
+            index = 0
+            while index < len(chunks):
                 if not self._is_current(request_id):
                     return
-                self._notify(status_callback, "Preparing Azure speech...")
-                synthesis_started = time.perf_counter()
-                audio_path = self.audio_dir / (
-                    f"read-aloud-{os.getpid()}-{request_id}-{index}.wav"
+                with self._navigation_lock:
+                    self._sentence_index = index
+                    rate = self._rate
+
+                self._notify(
+                    status_callback,
+                    f"Preparing sentence {index + 1} of {len(chunks)}...",
                 )
-                request_metrics = self._synthesize(
-                    chunk, key, region, audio_path, self._voice_for(text)
-                )
-                chunk_synthesis_ms = self._elapsed_ms(synthesis_started)
-                total_synthesis_ms += chunk_synthesis_ms
+                audio = ensure_audio(index, rate)
+                if audio is None:
+                    return
+                request_metrics = audio["request_metrics"]
                 record["azure_headers_ms"] = request_metrics["headers_ms"]
                 record["azure_download_ms"] = request_metrics["download_ms"]
 
                 if not self._is_current(request_id):
                     return
-                audio_seconds = self._audio_duration(audio_path)
-                total_audio_seconds += audio_seconds
-                self._player.play(audio_path)
+                with self._navigation_lock:
+                    requested = self._requested_sentence
+                    current_rate = self._rate
+                    if requested is not None:
+                        self._requested_sentence = None
+                if requested is not None or current_rate != rate:
+                    index = requested if requested is not None else index
+                    continue
+
+                total_audio_seconds += audio["duration"]
+                self._player.play(audio["path"])
                 if playback_started is None:
                     playback_started = time.perf_counter()
-                    record["first_chunk_synthesis_ms"] = chunk_synthesis_ms
+                    record["first_chunk_synthesis_ms"] = audio["synthesis_ms"]
                     record["time_to_audio_ms"] = self._elapsed_ms(started)
-                self._notify(status_callback, "Reading with Azure Speech...")
+                prefetch(index + 1, rate)
+                self._notify(
+                    status_callback,
+                    f"Reading with Azure Speech (sentence {index + 1} of {len(chunks)})...",
+                )
                 while self._is_current(request_id) and not self._player.is_finished():
                     time.sleep(0.05)
                 self._player.stop()
-                try:
-                    audio_path.unlink(missing_ok=True)
-                except OSError:
-                    logging.debug(
-                        "Could not remove temporary Azure audio: %s",
-                        audio_path,
-                        exc_info=True,
-                    )
+
+                with self._navigation_lock:
+                    requested = self._requested_sentence
+                    self._requested_sentence = None
+                index = requested if requested is not None else index + 1
 
             if self._is_current(request_id):
-                record["synthesis_ms"] = round(total_synthesis_ms, 2)
+                with cache_lock:
+                    record["synthesis_ms"] = round(
+                        sum(item["synthesis_ms"] for item in synthesis_measurements),
+                        2,
+                    )
                 record["audio_seconds"] = round(total_audio_seconds, 3)
+                record["read_aloud_rate"] = self.get_rate()
                 record["outcome"] = "completed"
                 outcome = "completed"
                 self._notify(status_callback, "Read Aloud finished.")
@@ -291,6 +402,25 @@ class AzureSpeechService:
             if self._is_current(request_id) and error_callback:
                 error_callback(str(exc))
         finally:
+            session_done.set()
+            if self._player is not None:
+                self._player.stop()
+            with self._navigation_lock:
+                if self._active_request_id == request_id:
+                    self._active_request_id = None
+                    self._sentences = []
+                    self._requested_sentence = None
+            with cache_lock:
+                cached_paths = [item["path"] for item in audio_cache.values()]
+            for audio_path in cached_paths:
+                try:
+                    audio_path.unlink(missing_ok=True)
+                except OSError:
+                    logging.debug(
+                        "Could not remove temporary Azure audio: %s",
+                        audio_path,
+                        exc_info=True,
+                    )
             record["outcome"] = outcome
             record["total_ms"] = self._elapsed_ms(started)
             self.metrics.append(record)
@@ -298,6 +428,10 @@ class AzureSpeechService:
     def stop(self) -> None:
         with self._state_lock:
             self._request_id += 1
+        with self._navigation_lock:
+            self._active_request_id = None
+            self._sentences = []
+            self._requested_sentence = None
         if self._player is not None:
             self._player.stop()
         if sys.platform.startswith("win"):
@@ -311,9 +445,43 @@ class AzureSpeechService:
     def toggle_pause(self) -> bool:
         return self._player.toggle_pause() if self._player is not None else False
 
-    def seek_relative(self, milliseconds: int) -> None:
-        if self._player is not None:
-            self._player.seek_relative(milliseconds)
+    def previous_sentence(self) -> None:
+        self._move_sentence(-1)
+
+    def next_sentence(self) -> None:
+        self._move_sentence(1)
+
+    def _move_sentence(self, delta: int) -> None:
+        should_interrupt = False
+        with self._navigation_lock:
+            if self._active_request_id is None or not self._sentences:
+                return
+            target = self._sentence_index + delta
+            target = max(0, min(len(self._sentences) - 1, target))
+            if delta > 0 and target == self._sentence_index:
+                return
+            self._requested_sentence = target
+            should_interrupt = True
+        if should_interrupt and self._player is not None:
+            self._player.stop()
+
+    def get_rate(self) -> float:
+        with self._navigation_lock:
+            return self._rate
+
+    def set_rate(self, rate: float) -> float:
+        normalized = self._normalize_rate(rate)
+        should_interrupt = False
+        with self._navigation_lock:
+            if normalized == self._rate:
+                return self._rate
+            self._rate = normalized
+            if self._active_request_id is not None and self._sentences:
+                self._requested_sentence = self._sentence_index
+                should_interrupt = True
+        if should_interrupt and self._player is not None:
+            self._player.stop()
+        return normalized
 
     def test_connection(self, key: str, region: str) -> None:
         """Synthesize and play a short sample, raising on any connection error."""
@@ -348,12 +516,21 @@ class AzureSpeechService:
         return key.strip(), (region.strip() or self.DEFAULT_REGION)
 
     def _synthesize(
-        self, text: str, key: str, region: str, output_path: Path, voice: str
+        self,
+        text: str,
+        key: str,
+        region: str,
+        output_path: Path,
+        voice: str,
+        rate: float = 1.0,
     ) -> dict[str, float]:
+        rate_percent = int(round((self._normalize_rate(rate) - 1.0) * 100))
+        prosody_rate = f"{rate_percent:+d}%"
         ssml = (
             '<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" '
             'xml:lang="en-US">'
-            f'<voice name="{html.escape(voice)}">{html.escape(text)}</voice>'
+            f'<voice name="{html.escape(voice)}"><prosody rate="{prosody_rate}">'
+            f"{html.escape(text)}</prosody></voice>"
             "</speak>"
         ).encode("utf-8")
         request = urllib.request.Request(
@@ -394,9 +571,27 @@ class AzureSpeechService:
 
     @staticmethod
     def _chunk_text(text: str) -> list[str]:
-        """Return one request so Azure produces uninterrupted speech."""
+        """Split text into sentence units for exact back/forward controls."""
         cleaned = " ".join(text.split())
-        return [cleaned] if cleaned else []
+        if not cleaned:
+            return []
+        sentences = [
+            match.group(0).strip()
+            for match in re.finditer(
+                r'.+?(?:[.!?\u061f]+(?:["\u201d\u2019)\]]+)?(?=\s|$)|$)',
+                cleaned,
+            )
+            if match.group(0).strip()
+        ]
+        return sentences or [cleaned]
+
+    @classmethod
+    def _normalize_rate(cls, rate) -> float:
+        try:
+            requested = float(rate)
+        except (TypeError, ValueError):
+            requested = 1.0
+        return min(cls.SUPPORTED_RATES, key=lambda value: abs(value - requested))
 
     def _begin_request(self) -> int:
         self.stop()

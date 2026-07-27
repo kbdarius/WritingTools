@@ -270,11 +270,52 @@ class WritingToolApp(QtWidgets.QApplication):
             except Exception as exc:
                 logging.debug("Read Aloud seek failed: %s", exc, exc_info=True)
 
+    def previous_sentence_read_aloud(self):
+        service = self._get_read_aloud_service()
+        if hasattr(service, "previous_sentence"):
+            try:
+                service.previous_sentence()
+            except Exception as exc:
+                logging.debug("Read Aloud previous sentence failed: %s", exc, exc_info=True)
+
+    def next_sentence_read_aloud(self):
+        service = self._get_read_aloud_service()
+        if hasattr(service, "next_sentence"):
+            try:
+                service.next_sentence()
+            except Exception as exc:
+                logging.debug("Read Aloud next sentence failed: %s", exc, exc_info=True)
+
+    def get_read_aloud_rate(self):
+        service = self._get_read_aloud_service()
+        if hasattr(service, "get_rate"):
+            return service.get_rate()
+        return float(self.config.get("read_aloud_rate", 1.0))
+
+    def cycle_read_aloud_rate(self):
+        rates = (0.75, 1.0, 1.25, 1.5, 2.0)
+        current = self.get_read_aloud_rate()
+        index = min(range(len(rates)), key=lambda i: abs(rates[i] - current))
+        rate = rates[(index + 1) % len(rates)]
+        service = self._get_read_aloud_service()
+        if hasattr(service, "set_rate"):
+            rate = service.set_rate(rate)
+        self.config["read_aloud_rate"] = rate
+        self.save_config(self.config)
+        return rate
+
     def can_pause_read_aloud(self):
         return hasattr(self._get_read_aloud_service(), "toggle_pause")
 
     def can_seek_read_aloud(self):
         return hasattr(self._get_read_aloud_service(), "seek_relative")
+
+    def can_navigate_read_aloud(self):
+        service = self._get_read_aloud_service()
+        return hasattr(service, "previous_sentence") and hasattr(service, "next_sentence")
+
+    def can_change_read_aloud_rate(self):
+        return hasattr(self._get_read_aloud_service(), "set_rate")
 
     def setup_translations(self, lang=None):
         if not lang:

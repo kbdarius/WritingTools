@@ -25,8 +25,8 @@ class SpeechControlWindow(QtWidgets.QWidget):
         style = self.style()
         self.rewind_button = self._button(
             style.standardIcon(QtWidgets.QStyle.StandardPixmap.SP_MediaSeekBackward),
-            "Rewind 10 seconds",
-            lambda: self.app.seek_read_aloud(-10_000),
+            "Previous sentence",
+            self.app.previous_sentence_read_aloud,
         )
         self.pause_button = self._button(
             style.standardIcon(QtWidgets.QStyle.StandardPixmap.SP_MediaPause),
@@ -35,9 +35,13 @@ class SpeechControlWindow(QtWidgets.QWidget):
         )
         self.forward_button = self._button(
             style.standardIcon(QtWidgets.QStyle.StandardPixmap.SP_MediaSeekForward),
-            "Forward 10 seconds",
-            lambda: self.app.seek_read_aloud(10_000),
+            "Next sentence",
+            self.app.next_sentence_read_aloud,
         )
+        self.speed_button = QtWidgets.QToolButton()
+        self.speed_button.setFixedSize(48, 34)
+        self.speed_button.clicked.connect(self._cycle_speed)
+        self.set_speed(self.app.get_read_aloud_rate())
         self.settings_button = self._button(
             style.standardIcon(QtWidgets.QStyle.StandardPixmap.SP_FileDialogDetailedView),
             "Read Aloud voice settings",
@@ -53,6 +57,7 @@ class SpeechControlWindow(QtWidgets.QWidget):
             self.rewind_button,
             self.pause_button,
             self.forward_button,
+            self.speed_button,
             self.settings_button,
             self.stop_button,
         ):
@@ -82,12 +87,15 @@ class SpeechControlWindow(QtWidgets.QWidget):
         self.rewind_button.setEnabled(False)
         self.pause_button.setEnabled(False)
         self.forward_button.setEnabled(False)
+        self.speed_button.setEnabled(False)
 
     def set_playing(self, message="Reading with Azure Speech..."):
         self.setToolTip(message)
-        self.rewind_button.setEnabled(self.app.can_seek_read_aloud())
+        self.rewind_button.setEnabled(self.app.can_navigate_read_aloud())
         self.pause_button.setEnabled(self.app.can_pause_read_aloud())
-        self.forward_button.setEnabled(self.app.can_seek_read_aloud())
+        self.forward_button.setEnabled(self.app.can_navigate_read_aloud())
+        self.speed_button.setEnabled(self.app.can_change_read_aloud_rate())
+        self.set_speed(self.app.get_read_aloud_rate())
         self.set_paused(False)
 
     def set_paused(self, paused):
@@ -102,6 +110,16 @@ class SpeechControlWindow(QtWidgets.QWidget):
     def _toggle_pause(self):
         paused = self.app.pause_read_aloud()
         self.set_paused(paused)
+
+    def set_speed(self, rate):
+        label = f"{rate:g}x"
+        self.speed_button.setText(label)
+        self.speed_button.setToolTip(
+            f"Reading speed: {label}. Click to change."
+        )
+
+    def _cycle_speed(self):
+        self.set_speed(self.app.cycle_read_aloud_rate())
 
     def close_without_cancel(self):
         """Close during normal cleanup without sending a second stop request."""
