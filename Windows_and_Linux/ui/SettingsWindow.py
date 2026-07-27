@@ -1,9 +1,17 @@
 import os
 import sys
 import threading
+import webbrowser
 
 from aiprovider import AIProvider, NoWheelComboBox
 from azure_speech import AzureSpeechService
+from azure_usage import (
+    AZURE_CLI_INSTALL_URL,
+    AZURE_POWERSHELL_INSTALL_URL,
+    azure_cli_path,
+    azure_powershell_available,
+    get_speech_usage,
+)
 from PySide6 import QtCore, QtWidgets
 from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QHBoxLayout, QRadioButton, QScrollArea
@@ -22,6 +30,7 @@ class SettingsWindow(QtWidgets.QWidget):
     close_signal = QtCore.Signal()
     validation_finished = QtCore.Signal(bool, str)
     azure_test_finished = QtCore.Signal(bool, str)
+    azure_usage_finished = QtCore.Signal(bool, str)
 
     def __init__(self, app, providers_only=False):
         super().__init__()
@@ -40,6 +49,11 @@ class SettingsWindow(QtWidgets.QWidget):
         self.azure_speech_region_input = None
         self.azure_voice_dropdown = None
         self.azure_test_button = None
+        self.azure_usage_button = None
+        self.azure_usage_label = None
+        self.azure_cli_status_label = None
+        self.azure_cli_install_button = None
+        self.azure_powershell_install_button = None
         self.option_prompt_inputs = {}
         self.save_button = None
         self.validation_label = None
@@ -49,6 +63,7 @@ class SettingsWindow(QtWidgets.QWidget):
         self.init_ui()
         self.validation_finished.connect(self._finish_provider_validation)
         self.azure_test_finished.connect(self._finish_azure_speech_test)
+        self.azure_usage_finished.connect(self._finish_azure_usage_check)
         self.retranslate_ui()
 
 
@@ -493,6 +508,54 @@ class SettingsWindow(QtWidgets.QWidget):
         self.azure_test_button.clicked.connect(self.test_azure_speech)
         content_layout.addWidget(self.azure_test_button)
 
+        azure_usage_title = QtWidgets.QLabel(_("Azure usage and free quota:"))
+        azure_usage_title.setStyleSheet(
+            f"font-size: 16px; color: {'#ffffff' if colorMode == 'dark' else '#333333'};"
+        )
+        content_layout.addWidget(azure_usage_title)
+        self.azure_usage_label = QtWidgets.QLabel(
+            _("Click Check Azure usage to retrieve the current month from Azure Monitor.")
+        )
+        self.azure_usage_label.setWordWrap(True)
+        self.azure_usage_label.setStyleSheet(
+            f"font-size: 13px; color: {'#cccccc' if colorMode == 'dark' else '#555555'};"
+        )
+        content_layout.addWidget(self.azure_usage_label)
+        if self.azure_usage_button is None:
+            self.azure_usage_button = QtWidgets.QPushButton(_("↻  Check Azure usage"))
+        self.azure_usage_button.setToolTip(
+            _("Read the official Synthesized Characters metric for this month.")
+        )
+        self.azure_usage_button.clicked.connect(self.check_azure_usage)
+        self.azure_usage_button.setText(_("Check Azure usage"))
+        content_layout.addWidget(self.azure_usage_button)
+
+        cli_available = bool(azure_cli_path())
+        powershell_available = azure_powershell_available()
+        cli_status = _("Azure CLI detected.") if cli_available else _("Azure CLI is not installed.")
+        powershell_status = (
+            _("Azure PowerShell detected.") if powershell_available
+            else _("Azure PowerShell is not installed (optional).")
+        )
+        self.azure_cli_status_label = QtWidgets.QLabel(f"{cli_status} {powershell_status}")
+        self.azure_cli_status_label.setWordWrap(True)
+        self.azure_cli_status_label.setStyleSheet(
+            f"font-size: 13px; color: {'#cccccc' if colorMode == 'dark' else '#555555'};"
+        )
+        content_layout.addWidget(self.azure_cli_status_label)
+        if not cli_available:
+            self.azure_cli_install_button = QtWidgets.QPushButton(_("Install Azure CLI (Microsoft)"))
+            self.azure_cli_install_button.clicked.connect(lambda: webbrowser.open(AZURE_CLI_INSTALL_URL))
+            content_layout.addWidget(self.azure_cli_install_button)
+        if not powershell_available:
+            self.azure_powershell_install_button = QtWidgets.QPushButton(
+                _("Install Azure PowerShell (Microsoft)")
+            )
+            self.azure_powershell_install_button.clicked.connect(
+                lambda: webbrowser.open(AZURE_POWERSHELL_INSTALL_URL)
+            )
+            content_layout.addWidget(self.azure_powershell_install_button)
+
         # Add provider selection
         provider_label = QtWidgets.QLabel(_("Choose AI Provider:"))
         provider_label.setStyleSheet(f"font-size: 16px; color: {'#ffffff' if colorMode == 'dark' else '#333333'};")
@@ -692,6 +755,45 @@ class SettingsWindow(QtWidgets.QWidget):
             self.azure_test_finished.emit(success, message)
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def check_azure_usage(self):
+        if self._validation_in_progress:
+            return
+        self._validation_in_progress = True
+        self.azure_usage_button.setEnabled(False)
+        self.azure_usage_label.setText(_("Checking Azure Monitor usage..."))
+
+        def worker():
+            try:
+                usage = get_speech_usage(self.app.config)
+                if usage["quota"] is None:
+                    message = _(
+                        "%s: %s synthesized characters this month (%s tier). "
+                        "A free F0 quota is not available for this tier; see Azure Cost Management for cost."
+                    ) % (usage["resource_name"], f"{usage['characters']:,}", usage["sku"])
+                else:
+                    message = _(
+                        "%s: %s / %s characters used (%0.1f%% used, %0.1f%% remaining). "
+                        "Estimated reset: %s. Checked %s."
+                    ) % (
+                        usage["resource_name"], f"{usage['characters']:,}", f"{usage['quota']:,}",
+                        usage["percent_used"], usage["percent_remaining"],
+                        usage["reset_date"], usage["checked_at"],
+                    )
+                self.azure_usage_finished.emit(True, message)
+            except Exception as exc:
+                self.azure_usage_finished.emit(False, str(exc))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    @QtCore.Slot(bool, str)
+    def _finish_azure_usage_check(self, success, message):
+        self._validation_in_progress = False
+        self.azure_usage_button.setEnabled(True)
+        self.azure_usage_label.setText(message)
+        self.azure_usage_label.setStyleSheet(
+            f"font-size: 13px; color: {'#63d471' if success else '#d93025'};"
+        )
 
     @QtCore.Slot(bool, str)
     def _finish_azure_speech_test(self, success, message):
