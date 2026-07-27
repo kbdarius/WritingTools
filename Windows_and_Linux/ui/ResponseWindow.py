@@ -506,7 +506,7 @@ class ResponseWindow(QtWidgets.QWidget):
         if not response_text:
             return
         try:
-            self.app.local_speech.speak(
+            self.app.speak_with_read_aloud(
                 response_text,
                 status_callback=self.app.speech_status_signal.emit,
                 error_callback=self.app.speech_error_signal.emit,

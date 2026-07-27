@@ -217,6 +217,46 @@ class WritingToolApp(QtWidgets.QApplication):
             daemon=True,
         ).start()
 
+    def _get_read_aloud_service(self):
+        provider = self.config.get("read_aloud_provider", "azure")
+        if provider == "local":
+            return self.local_speech
+        if provider == "word":
+            return self.word_speech
+        return self.azure_speech
+
+    def speak_with_read_aloud(self, text, status_callback=None, error_callback=None, metrics_context=None):
+        service = self._get_read_aloud_service()
+        service.speak(
+            text,
+            status_callback=status_callback,
+            error_callback=error_callback,
+            metrics_context=metrics_context,
+        )
+
+    def pause_read_aloud(self):
+        service = self._get_read_aloud_service()
+        if hasattr(service, "toggle_pause"):
+            try:
+                return service.toggle_pause()
+            except Exception as exc:
+                logging.debug("Read Aloud pause toggle failed: %s", exc, exc_info=True)
+        return False
+
+    def seek_read_aloud(self, milliseconds):
+        service = self._get_read_aloud_service()
+        if hasattr(service, "seek_relative"):
+            try:
+                service.seek_relative(milliseconds)
+            except Exception as exc:
+                logging.debug("Read Aloud seek failed: %s", exc, exc_info=True)
+
+    def can_pause_read_aloud(self):
+        return hasattr(self._get_read_aloud_service(), "toggle_pause")
+
+    def can_seek_read_aloud(self):
+        return hasattr(self._get_read_aloud_service(), "seek_relative")
+
     def setup_translations(self, lang=None):
         if not lang:
             lang = QLocale.system().name().split('_')[0]
@@ -1054,7 +1094,7 @@ class WritingToolApp(QtWidgets.QApplication):
                     2,
                 )
             logging.info('Read Aloud provider: Microsoft Azure Speech')
-            self.azure_speech.speak(
+            self.speak_with_read_aloud(
                 selected_text,
                 status_callback=self.speech_status_signal.emit,
                 error_callback=self.speech_error_signal.emit,

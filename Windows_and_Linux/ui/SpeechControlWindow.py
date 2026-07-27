@@ -26,7 +26,7 @@ class SpeechControlWindow(QtWidgets.QWidget):
         self.rewind_button = self._button(
             style.standardIcon(QtWidgets.QStyle.StandardPixmap.SP_MediaSeekBackward),
             "Rewind 10 seconds",
-            lambda: self.app.azure_speech.seek_relative(-10_000),
+            lambda: self.app.seek_read_aloud(-10_000),
         )
         self.pause_button = self._button(
             style.standardIcon(QtWidgets.QStyle.StandardPixmap.SP_MediaPause),
@@ -36,7 +36,7 @@ class SpeechControlWindow(QtWidgets.QWidget):
         self.forward_button = self._button(
             style.standardIcon(QtWidgets.QStyle.StandardPixmap.SP_MediaSeekForward),
             "Forward 10 seconds",
-            lambda: self.app.azure_speech.seek_relative(10_000),
+            lambda: self.app.seek_read_aloud(10_000),
         )
         self.settings_button = self._button(
             style.standardIcon(QtWidgets.QStyle.StandardPixmap.SP_FileDialogDetailedView),
@@ -66,7 +66,7 @@ class SpeechControlWindow(QtWidgets.QWidget):
             "QToolButton:pressed { background: #d6d6d6; }"
             "QToolButton:disabled { opacity: 0.4; }"
         )
-        self.set_preparing("Preparing Azure speech...")
+        self.set_preparing("Preparing speech...")
 
     def _button(self, icon, tooltip, callback):
         button = QtWidgets.QToolButton()
@@ -85,9 +85,9 @@ class SpeechControlWindow(QtWidgets.QWidget):
 
     def set_playing(self, message="Reading with Azure Speech..."):
         self.setToolTip(message)
-        self.rewind_button.setEnabled(True)
-        self.pause_button.setEnabled(True)
-        self.forward_button.setEnabled(True)
+        self.rewind_button.setEnabled(self.app.can_seek_read_aloud())
+        self.pause_button.setEnabled(self.app.can_pause_read_aloud())
+        self.forward_button.setEnabled(self.app.can_seek_read_aloud())
         self.set_paused(False)
 
     def set_paused(self, paused):
@@ -100,7 +100,7 @@ class SpeechControlWindow(QtWidgets.QWidget):
         self.pause_button.setToolTip("Resume" if paused else "Pause")
 
     def _toggle_pause(self):
-        paused = self.app.azure_speech.toggle_pause()
+        paused = self.app.pause_read_aloud()
         self.set_paused(paused)
 
     def close_without_cancel(self):
