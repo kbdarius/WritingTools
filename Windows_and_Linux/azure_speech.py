@@ -197,6 +197,15 @@ class AzureSpeechService:
     DEFAULT_REGION = "eastus"
     ENGLISH_VOICE = "en-US-JennyNeural"
     PERSIAN_VOICE = "fa-IR-DilaraNeural"
+    ENGLISH_VOICES = (
+        ("Ava", "en-US-AvaNeural"),
+        ("Phoebe Multilingual", "en-US-PhoebeMultilingualNeural"),
+        ("Phoebe Dragon HD", "en-US-Phoebe:DragonHDLatestNeural"),
+        ("Ava Dragon HD", "en-US-Ava:DragonHDLatestNeural"),
+        ("Emma Dragon HD", "en-US-Emma:DragonHDLatestNeural"),
+        ("Andrew Dragon HD", "en-US-Andrew:DragonHDLatestNeural"),
+        ("Jenny (original)", ENGLISH_VOICE),
+    )
     SUPPORTED_RATES = (0.75, 1.0, 1.25, 1.5, 2.0)
 
     def __init__(self, config: dict) -> None:
@@ -483,8 +492,8 @@ class AzureSpeechService:
             self._player.stop()
         return normalized
 
-    def test_connection(self, key: str, region: str) -> None:
-        """Synthesize and play a short sample, raising on any connection error."""
+    def test_connection(self, key: str, region: str, voice: Optional[str] = None) -> None:
+        """Synthesize and play the selected voice, raising on any connection error."""
         if not sys.platform.startswith("win"):
             raise RuntimeError("Azure Read Aloud is currently available on Windows only.")
         key = key.strip()
@@ -495,12 +504,17 @@ class AzureSpeechService:
         import winsound
 
         output_path = self.audio_dir / "connection-test.wav"
+        selected_voice = self._normalize_english_voice(voice)
+        voice_name = next(
+            (name for name, voice_id in self.ENGLISH_VOICES if voice_id == selected_voice),
+            "selected voice",
+        )
         self._synthesize(
-            "Azure Speech is connected and working.",
+            f"Hello. This is {voice_name}. This is how I will sound when reading English text.",
             key,
             region,
             output_path,
-            self.ENGLISH_VOICE,
+            selected_voice,
         )
         winsound.PlaySound(
             str(output_path),
@@ -563,11 +577,18 @@ class AzureSpeechService:
         except urllib.error.URLError as exc:
             raise RuntimeError(f"Could not reach Azure Speech: {exc.reason}") from exc
 
-    @classmethod
-    def _voice_for(cls, text: str) -> str:
+    def _voice_for(self, text: str) -> str:
         persian = sum("\u0600" <= char <= "\u06ff" for char in text)
         latin = sum(char.isascii() and char.isalpha() for char in text)
-        return cls.PERSIAN_VOICE if persian > latin else cls.ENGLISH_VOICE
+        if persian > latin:
+            return self.PERSIAN_VOICE
+        settings = self.config.get("azure_speech", {})
+        return self._normalize_english_voice(settings.get("voice"))
+
+    @classmethod
+    def _normalize_english_voice(cls, voice: Optional[str]) -> str:
+        supported = {voice_id for _, voice_id in cls.ENGLISH_VOICES}
+        return voice if voice in supported else cls.ENGLISH_VOICE
 
     @staticmethod
     def _chunk_text(text: str) -> list[str]:

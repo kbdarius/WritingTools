@@ -3,6 +3,7 @@ import sys
 import threading
 
 from aiprovider import AIProvider, NoWheelComboBox
+from azure_speech import AzureSpeechService
 from PySide6 import QtCore, QtWidgets
 from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QHBoxLayout, QRadioButton, QScrollArea
@@ -37,6 +38,7 @@ class SettingsWindow(QtWidgets.QWidget):
         self.read_aloud_provider_dropdown = None
         self.azure_speech_key_input = None
         self.azure_speech_region_input = None
+        self.azure_voice_dropdown = None
         self.azure_test_button = None
         self.option_prompt_inputs = {}
         self.save_button = None
@@ -335,9 +337,43 @@ class SettingsWindow(QtWidgets.QWidget):
             self.azure_speech_region_input.setPlaceholderText(_("For example: eastus"))
             content_layout.addWidget(self.azure_speech_region_input)
 
-            self.azure_test_button = QtWidgets.QPushButton(_("Test Azure Speech"))
+            azure_voice_label = QtWidgets.QLabel(_("English Read Aloud voice:"))
+            azure_voice_label.setStyleSheet(
+                f"font-size: 16px; color: {'#ffffff' if colorMode == 'dark' else '#333333'};"
+            )
+            content_layout.addWidget(azure_voice_label)
+            self.azure_voice_dropdown = NoWheelComboBox()
+            for voice_name, voice_id in AzureSpeechService.ENGLISH_VOICES:
+                self.azure_voice_dropdown.addItem(voice_name, voice_id)
+            saved_voice = AzureSpeechService._normalize_english_voice(
+                azure_settings.get('voice')
+            )
+            saved_voice_index = self.azure_voice_dropdown.findData(saved_voice)
+            self.azure_voice_dropdown.setCurrentIndex(max(0, saved_voice_index))
+            self.azure_voice_dropdown.setToolTip(
+                _("Choose the Azure voice used for English. Persian text still uses Dilara automatically.")
+            )
+            self.azure_voice_dropdown.setStyleSheet(f"""
+                font-size: 16px;
+                padding: 5px;
+                background-color: {'#444' if colorMode == 'dark' else 'white'};
+                color: {'#ffffff' if colorMode == 'dark' else '#000000'};
+                border: 1px solid {'#666' if colorMode == 'dark' else '#ccc'};
+            """)
+            content_layout.addWidget(self.azure_voice_dropdown)
+
+            persian_voice_note = QtWidgets.QLabel(
+                _("Persian/Farsi text automatically uses Dilara; this English selection does not replace it.")
+            )
+            persian_voice_note.setWordWrap(True)
+            persian_voice_note.setStyleSheet(
+                f"font-size: 13px; color: {'#cccccc' if colorMode == 'dark' else '#555555'};"
+            )
+            content_layout.addWidget(persian_voice_note)
+
+            self.azure_test_button = QtWidgets.QPushButton(_("\u25b6  Test selected voice"))
             self.azure_test_button.setToolTip(
-                _("Connect to Azure and play a short test sentence through your speakers.")
+                _("Connect to Azure and play a short sample of the highlighted English voice.")
             )
             self.azure_test_button.clicked.connect(self.test_azure_speech)
             content_layout.addWidget(self.azure_test_button)
@@ -623,10 +659,14 @@ class SettingsWindow(QtWidgets.QWidget):
             return
         key = self.azure_speech_key_input.text().strip()
         region = self.azure_speech_region_input.text().strip()
+        voice = self.azure_voice_dropdown.currentData()
+        voice_name = self.azure_voice_dropdown.currentText()
         self._validation_in_progress = True
         self.azure_test_button.setEnabled(False)
         self.save_button.setEnabled(False)
-        self.validation_label.setText(_("Connecting to Azure Speech and creating a test sound..."))
+        self.validation_label.setText(
+            _("Creating a quick %s voice sample...") % voice_name
+        )
         self.validation_label.setStyleSheet(
             f"color: {'#ffffff' if colorMode == 'dark' else '#333333'}; font-size: 14px;"
         )
@@ -634,9 +674,9 @@ class SettingsWindow(QtWidgets.QWidget):
 
         def worker():
             try:
-                self.app.azure_speech.test_connection(key, region)
+                self.app.azure_speech.test_connection(key, region, voice)
                 success = True
-                message = "Azure Speech connected successfully. The test sound was played."
+                message = f"{voice_name} test completed successfully."
             except Exception as exc:
                 success = False
                 message = f"Azure Speech test failed: {exc}"
@@ -730,6 +770,7 @@ class SettingsWindow(QtWidgets.QWidget):
             self.app.config['azure_speech'] = {
                 'key': self.azure_speech_key_input.text().strip(),
                 'region': self.azure_speech_region_input.text().strip(),
+                'voice': self.azure_voice_dropdown.currentData(),
             }
         else:
             self.app.create_tray_icon()
