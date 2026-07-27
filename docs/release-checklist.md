@@ -8,5 +8,6 @@ Use this before delivering a new build or release.
 4. Confirm the output is a versioned file such as `Writing Tools v<version>.exe` and that it is the only versioned executable remaining in repo root.
 5. Commit the release changes.
 6. Push the completed release to the GitHub `main` branch.
+7. Provide completion report: repo path, commit hash, version value, build status, and final exe filename.
 
 If anything changes in the build flow, update `docs/build-and-release-windows.md` at the same time.
