@@ -234,6 +234,25 @@ class WritingToolApp(QtWidgets.QApplication):
             metrics_context=metrics_context,
         )
 
+    def start_read_aloud(self, text, status_callback=None, error_callback=None, metrics_context=None):
+        """Start speech without blocking the Qt event loop.
+
+        Azure playback is synchronous for the lifetime of the audio. Keeping
+        it off the GUI thread lets the floating controls process Pause,
+        Resume, Seek, and Stop clicks while speech is active.
+        """
+        threading.Thread(
+            target=self.speak_with_read_aloud,
+            kwargs={
+                "text": text,
+                "status_callback": status_callback,
+                "error_callback": error_callback,
+                "metrics_context": metrics_context,
+            },
+            daemon=True,
+            name="WritingToolsReadAloud",
+        ).start()
+
     def pause_read_aloud(self):
         service = self._get_read_aloud_service()
         if hasattr(service, "toggle_pause"):
@@ -1094,7 +1113,7 @@ class WritingToolApp(QtWidgets.QApplication):
                     2,
                 )
             logging.info('Read Aloud provider: Microsoft Azure Speech')
-            self.speak_with_read_aloud(
+            self.start_read_aloud(
                 selected_text,
                 status_callback=self.speech_status_signal.emit,
                 error_callback=self.speech_error_signal.emit,
