@@ -349,6 +349,15 @@ class SettingsWindow(QtWidgets.QWidget):
                     f"color: {'#ffffff' if colorMode == 'dark' else '#000000'}; border: 1px solid {'#666' if colorMode == 'dark' else '#ccc'};"
                 )
                 name_row.addWidget(name_input)
+                visible_checkbox = QtWidgets.QCheckBox(_("Show in Ctrl+Space"))
+                visible_checkbox.setChecked(option_config.get("visible", True))
+                visible_checkbox.setToolTip(
+                    _("Unchecked prompts stay saved here, but they are hidden from the Ctrl+Space popup.")
+                )
+                visible_checkbox.setStyleSheet(
+                    f"font-size: 14px; color: {'#ffffff' if colorMode == 'dark' else '#333333'};"
+                )
+                name_row.addWidget(visible_checkbox)
                 delete_button = QtWidgets.QPushButton(_("Delete"))
                 delete_button.setStyleSheet(
                     "QPushButton { background-color: #b3261e; color: white; border: none; "
@@ -388,6 +397,7 @@ class SettingsWindow(QtWidgets.QWidget):
 
                 self.option_prompt_inputs[option_name] = {
                     "name": name_input,
+                    "visible": visible_checkbox,
                     "prefix": prefix_input,
                     "instruction": instruction_input,
                     "section": section,
@@ -711,6 +721,7 @@ class SettingsWindow(QtWidgets.QWidget):
                 return None
 
             updated = option_config.copy()
+            updated["visible"] = editors["visible"].isChecked()
             updated["prefix"] = editors["prefix"].text()
             updated["instruction"] = editors["instruction"].toPlainText()
             renamed[new_name] = updated
