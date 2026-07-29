@@ -24,6 +24,62 @@ StatusCallback = Optional[Callable[[str], None]]
 ErrorCallback = Optional[Callable[[str], None]]
 
 
+_URL_RE = re.compile(r"(?i)\b(?:https?://|www\.)[^\s<>]+")
+_FENCED_CODE_RE = re.compile(r"```.*?```", re.DOTALL)
+_INLINE_CODE_RE = re.compile(r"`([^`]+)`")
+_PATH_RE = re.compile(r"(?<!\w)(?:[A-Za-z]:)?(?:[\\/][^\s<>]+|[A-Za-z0-9_.-]+(?:[\\/][^\s<>]+)+)")
+_FILENAME_RE = re.compile(
+    r"(?<![\w.-])([\w.-]+(?:_[\w.-]+)+\.[A-Za-z0-9]{1,8}|[\w.-]+\.(?:pdf|docx?|xlsx?|pptx?|txt|csv|json|xml|html?|py|js|ts|md|zip))\b",
+    re.IGNORECASE,
+)
+_LONG_IDENTIFIER_RE = re.compile(r"\b(?=[A-Za-z0-9_./\\-]{20,}\b)(?=[^\s]*[_/\\])[^\s]+")
+
+
+def prepare_text_for_speech(text: str, natural_reading: bool = True) -> str:
+    """Convert machine-formatted fragments into concise spoken text.
+
+    This pass is intentionally local and conservative. It removes details
+    that are rarely useful when listening while preserving ordinary prose.
+    """
+    cleaned = " ".join((text or "").split())
+    if not natural_reading or not cleaned:
+        return cleaned
+
+    cleaned = _FENCED_CODE_RE.sub(". Code block omitted. ", cleaned)
+
+    def url_replacement(match: re.Match) -> str:
+        value = match.group(0)
+        trailing = ""
+        while value and value[-1] in ".,;:!?)]}":
+            trailing = value[-1] + trailing
+            value = value[:-1]
+        return " a web link " + trailing
+
+    cleaned = _URL_RE.sub(url_replacement, cleaned)
+    cleaned = _INLINE_CODE_RE.sub(r" \1 ", cleaned)
+    cleaned = _PATH_RE.sub(" a file ", cleaned)
+
+    def filename_replacement(match: re.Match) -> str:
+        value = match.group(1)
+        stem = re.sub(r"\.[A-Za-z0-9]{1,8}$", "", value)
+        words = re.split(r"[_./\\-]+", stem)
+        meaningful = [word for word in words if word and not re.fullmatch(r"\d{3,}", word)]
+        if not meaningful:
+            return " a file "
+        return " " + " ".join(meaningful[:8]) + " "
+
+    cleaned = _FILENAME_RE.sub(filename_replacement, cleaned)
+    cleaned = _LONG_IDENTIFIER_RE.sub(" an identifier ", cleaned)
+
+    # Remove markup-like punctuation only when it is acting as a separator.
+    cleaned = re.sub(r"(?<=[A-Za-z0-9])[/\\]+(?=[A-Za-z0-9])", " ", cleaned)
+    cleaned = re.sub(r"(?<=[A-Za-z0-9])[_#]+(?=[A-Za-z0-9])", " ", cleaned)
+    cleaned = re.sub(r"\s+([,.;:!?])", r"\1", cleaned)
+    cleaned = re.sub(r"\.{2,}", ".", cleaned)
+    cleaned = " ".join(cleaned.split()).strip()
+    return cleaned.lstrip(". ").strip()
+
+
 class _WindowsMciWavePlayer:
     """Small Windows WAV player with pause and seek support."""
 
@@ -253,11 +309,17 @@ class AzureSpeechService:
                     "Azure Speech is not configured. Add the Speech resource region in Settings > General."
                 )
 
-            chunks = self._chunk_text(text)
+            natural_reading = self.config.get("azure_speech", {}).get(
+                "natural_reading", True
+            )
+            speech_text = prepare_text_for_speech(text, natural_reading)
+            chunks = self._chunk_text(speech_text)
             record["provider"] = "azure"
             record["chunk_count"] = len(chunks)
             record["voice"] = self._voice_for(text)
             record["sentence_count"] = len(chunks)
+            record["natural_reading"] = bool(natural_reading)
+            record["spoken_text"] = speech_text
             playback_started = None
             total_audio_seconds = 0.0
 

@@ -48,6 +48,7 @@ class SettingsWindow(QtWidgets.QWidget):
         self.azure_speech_key_input = None
         self.azure_speech_region_input = None
         self.azure_voice_dropdown = None
+        self.natural_reading_checkbox = None
         self.azure_test_button = None
         self.azure_usage_button = None
         self.azure_usage_label = None
@@ -441,6 +442,22 @@ class SettingsWindow(QtWidgets.QWidget):
         )
         content_layout.addWidget(read_aloud_intro)
 
+        azure_settings = self.app.config.get('azure_speech', {})
+
+        self.natural_reading_checkbox = QtWidgets.QCheckBox(
+            _("Natural reading mode (skip URLs, code, and machine-style identifiers)")
+        )
+        self.natural_reading_checkbox.setChecked(
+            azure_settings.get('natural_reading', True)
+        )
+        self.natural_reading_checkbox.setToolTip(
+            _("Shorten filenames and technical fragments before sending text to Azure Speech.")
+        )
+        self.natural_reading_checkbox.setStyleSheet(
+            f"font-size: 14px; color: {'#ffffff' if colorMode == 'dark' else '#333333'};"
+        )
+        content_layout.addWidget(self.natural_reading_checkbox)
+
         self.read_aloud_provider_dropdown = NoWheelComboBox()
         self.read_aloud_provider_dropdown.addItem(_("Microsoft Azure Speech"), "azure")
         self.read_aloud_provider_dropdown.setToolTip(
@@ -455,7 +472,6 @@ class SettingsWindow(QtWidgets.QWidget):
         """)
         content_layout.addWidget(self.read_aloud_provider_dropdown)
 
-        azure_settings = self.app.config.get('azure_speech', {})
         azure_key_label = QtWidgets.QLabel(_("Azure Speech resource key:"))
         azure_key_label.setStyleSheet(
             f"font-size: 16px; color: {'#ffffff' if colorMode == 'dark' else '#333333'};"
@@ -893,6 +909,7 @@ class SettingsWindow(QtWidgets.QWidget):
                 'key': self.azure_speech_key_input.text().strip(),
                 'region': self.azure_speech_region_input.text().strip(),
                 'voice': self.azure_voice_dropdown.currentData(),
+                'natural_reading': self.natural_reading_checkbox.isChecked(),
             }
         else:
             self.app.create_tray_icon()
