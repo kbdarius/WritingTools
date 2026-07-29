@@ -829,14 +829,27 @@ class SettingsWindow(QtWidgets.QWidget):
                         "A free F0 quota is not available for this tier; see Azure Cost Management for cost."
                     ) % (usage["resource_name"], f"{usage['characters']:,}", usage["sku"])
                 else:
+                    if usage.get("recent_daily_average", 0) > 0:
+                        forecast = _(
+                            " Recent 3-day average: %(average)s characters/day."
+                            " At this pace, quota exhaustion is estimated around %(exhaustion)s."
+                        ) % {
+                            "average": f"{usage['recent_daily_average']:,.0f}",
+                            "exhaustion": usage.get("estimated_exhaustion_date") or _("after the reset window"),
+                        }
+                    else:
+                        forecast = _(
+                            " Recent usage history is not sufficient for a forecast; check again over the next few days."
+                        )
                     message = _(
                         "%s: %s / %s characters used (%0.1f%% used, %0.1f%% remaining). "
-                        "Estimated reset: %s. Checked %s."
+                        "Estimated reset: %s (%s days remaining). Checked %s.%s"
                     ) % (
                         usage["resource_name"], f"{usage['characters']:,}", f"{usage['quota']:,}",
                         usage["percent_used"], usage["percent_remaining"],
-                        usage["reset_date"], usage["checked_at"],
+                        usage["reset_date"], usage["days_until_reset"], usage["checked_at"], forecast,
                     )
+                self.app.save_config(self.app.config)
                 self.azure_usage_finished.emit(True, message)
             except Exception as exc:
                 self.azure_usage_finished.emit(False, str(exc))

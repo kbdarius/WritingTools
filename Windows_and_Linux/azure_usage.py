@@ -6,7 +6,7 @@ import json
 import os
 import shutil
 import subprocess
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 
@@ -124,6 +124,39 @@ def _next_month_reset(now: datetime) -> str:
     return f"{year:04d}-{month:02d}-01"
 
 
+def _usage_forecast(config: dict, usage: dict[str, Any], now: datetime) -> dict[str, Any]:
+    """Record cumulative totals and estimate exhaustion from recent intervals."""
+    history = config.setdefault("azure_usage_history", {})
+    today = now.astimezone().date().isoformat()
+    history[today] = int(usage["characters"])
+    cutoff = now.astimezone().date() - timedelta(days=31)
+    for day in list(history):
+        try:
+            if datetime.fromisoformat(day).date() < cutoff:
+                del history[day]
+        except ValueError:
+            del history[day]
+
+    dated = sorted((datetime.fromisoformat(day).date(), int(total)) for day, total in history.items())
+    intervals = []
+    for (previous_day, previous_total), (current_day, current_total) in zip(dated, dated[1:]):
+        days = (current_day - previous_day).days
+        delta = current_total - previous_total
+        if days > 0 and delta >= 0:
+            intervals.append(delta / days)
+    recent = intervals[-3:]
+    average = sum(recent) / len(recent) if recent else 0
+    remaining = usage.get("remaining")
+    usage["recent_daily_average"] = average
+    usage["estimated_exhaustion_date"] = (
+        (now.astimezone().date() + timedelta(days=remaining / average)).isoformat()
+        if remaining is not None and average > 0 and remaining > 0 else None
+    )
+    reset = datetime.fromisoformat(usage["reset_date"]).date()
+    usage["days_until_reset"] = max(0, (reset - now.astimezone().date()).days)
+    return usage
+
+
 def get_speech_usage(config: dict) -> dict[str, Any]:
     """Return current-month Speech usage and F0 quota information."""
     cli = azure_cli_path()
@@ -163,7 +196,7 @@ def get_speech_usage(config: dict) -> dict[str, Any]:
     quota = F0_MONTHLY_CHARACTERS if str(sku).upper() == "F0" else None
     remaining = max(0, quota - characters) if quota is not None else None
     percent_used = (characters / quota * 100) if quota else None
-    return {
+    usage = {
         "resource_name": resource.get("name", "Speech resource"), "sku": str(sku),
         "characters": characters, "quota": quota, "remaining": remaining,
         "percent_used": percent_used,
@@ -171,3 +204,4 @@ def get_speech_usage(config: dict) -> dict[str, Any]:
         "reset_date": _next_month_reset(now.astimezone()),
         "checked_at": now.astimezone().strftime("%Y-%m-%d %H:%M %Z"),
     }
+    return _usage_forecast(config, usage, now)
