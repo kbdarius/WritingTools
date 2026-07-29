@@ -12,7 +12,9 @@ from typing import Any
 
 AZURE_CLI_INSTALL_URL = "https://learn.microsoft.com/en-us/cli/azure/install-azure-cli-windows"
 AZURE_POWERSHELL_INSTALL_URL = "https://learn.microsoft.com/en-us/powershell/azure/install-azure-powershell"
+AZURE_CLI_INSTALL_SCRIPT_URL = "https://aka.ms/installazurecliwindows"
 F0_MONTHLY_CHARACTERS = 500_000
+AZURE_INSTALL_TIMEOUT_SECONDS = 1800
 
 
 def azure_cli_path() -> str | None:
@@ -43,6 +45,60 @@ def azure_powershell_available() -> bool:
         return result.returncode == 0
     except (OSError, subprocess.SubprocessError):
         return False
+
+
+def _resolve_powershell() -> str | None:
+    return shutil.which("powershell") or shutil.which("pwsh")
+
+
+def _run_powershell_script(script: str, timeout: int = 900, show_window: bool = False) -> None:
+    command = _resolve_powershell()
+    if not command:
+        raise RuntimeError("PowerShell is not installed. Please install PowerShell first.")
+
+    result = subprocess.run(
+        [
+            command,
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            script,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        creationflags=0 if show_window else getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip()
+        raise RuntimeError(detail or "PowerShell command failed.")
+
+
+def install_azure_cli() -> None:
+    """Install Azure CLI using the official Microsoft bootstrap script."""
+    if os.name != "nt":
+        raise RuntimeError("Azure CLI installation is currently supported on Windows only.")
+
+    script = f"iwr -UseBasicParsing -Uri '{AZURE_CLI_INSTALL_SCRIPT_URL}' | Invoke-Expression"
+    _run_powershell_script(script, timeout=AZURE_INSTALL_TIMEOUT_SECONDS, show_window=True)
+
+
+def install_azure_powershell() -> None:
+    """Install the Az PowerShell module for Azure account operations."""
+    if os.name != "nt":
+        raise RuntimeError("Azure PowerShell installation is currently supported on Windows only.")
+
+    script = (
+        "$repo = Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue; "
+        "if ($repo -ne $null -and $repo.InstallationPolicy -ne 'Trusted') "
+        "{ Set-PSRepository -Name PSGallery -InstallationPolicy Trusted | Out-Null }; "
+        "if (-not (Get-Module -ListAvailable -Name Az.Accounts)) { "
+        "Install-Module -Name Az -Scope CurrentUser -AllowClobber -Force -ErrorAction Stop "
+        "}"
+    )
+    _run_powershell_script(script, timeout=AZURE_INSTALL_TIMEOUT_SECONDS, show_window=True)
 
 
 def _run_cli(cli: str, *arguments: str) -> Any:

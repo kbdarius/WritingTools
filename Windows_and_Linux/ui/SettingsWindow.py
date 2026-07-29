@@ -8,6 +8,8 @@ from azure_speech import AzureSpeechService
 from azure_usage import (
     AZURE_CLI_INSTALL_URL,
     AZURE_POWERSHELL_INSTALL_URL,
+    install_azure_cli as install_azure_cli_tool,
+    install_azure_powershell as install_azure_powershell_tool,
     azure_cli_path,
     azure_powershell_available,
     get_speech_usage,
@@ -31,6 +33,7 @@ class SettingsWindow(QtWidgets.QWidget):
     validation_finished = QtCore.Signal(bool, str)
     azure_test_finished = QtCore.Signal(bool, str)
     azure_usage_finished = QtCore.Signal(bool, str)
+    azure_install_finished = QtCore.Signal(str, bool, str)
 
     def __init__(self, app, providers_only=False):
         super().__init__()
@@ -61,10 +64,12 @@ class SettingsWindow(QtWidgets.QWidget):
         self._validation_in_progress = False
         self._pending_provider = None
         self._pending_provider_config = None
+        self._azure_install_in_progress = False
         self.init_ui()
         self.validation_finished.connect(self._finish_provider_validation)
         self.azure_test_finished.connect(self._finish_azure_speech_test)
         self.azure_usage_finished.connect(self._finish_azure_usage_check)
+        self.azure_install_finished.connect(self._finish_azure_install)
         self.retranslate_ui()
 
 
@@ -571,14 +576,14 @@ class SettingsWindow(QtWidgets.QWidget):
         content_layout.addWidget(self.azure_cli_status_label)
         if not cli_available:
             self.azure_cli_install_button = QtWidgets.QPushButton(_("Install Azure CLI (Microsoft)"))
-            self.azure_cli_install_button.clicked.connect(lambda: webbrowser.open(AZURE_CLI_INSTALL_URL))
+            self.azure_cli_install_button.clicked.connect(self.install_azure_cli)
             content_layout.addWidget(self.azure_cli_install_button)
         if not powershell_available:
             self.azure_powershell_install_button = QtWidgets.QPushButton(
                 _("Install Azure PowerShell (Microsoft)")
             )
             self.azure_powershell_install_button.clicked.connect(
-                lambda: webbrowser.open(AZURE_POWERSHELL_INSTALL_URL)
+                self.install_azure_powershell
             )
             content_layout.addWidget(self.azure_powershell_install_button)
 
@@ -812,6 +817,91 @@ class SettingsWindow(QtWidgets.QWidget):
                 self.azure_usage_finished.emit(False, str(exc))
 
         threading.Thread(target=worker, daemon=True).start()
+
+    @QtCore.Slot()
+    def install_azure_cli(self):
+        self._start_azure_component_install("cli", install_azure_cli_tool, _("Azure CLI"))
+
+    @QtCore.Slot()
+    def install_azure_powershell(self):
+        self._start_azure_component_install(
+            "powershell",
+            install_azure_powershell_tool,
+            _("Azure PowerShell"),
+        )
+
+    def _start_azure_component_install(self, component_name, installer, label):
+        if self._azure_install_in_progress:
+            return
+
+        self._azure_install_in_progress = True
+        if self.azure_cli_install_button is not None:
+            self.azure_cli_install_button.setEnabled(False)
+        if self.azure_powershell_install_button is not None:
+            self.azure_powershell_install_button.setEnabled(False)
+        self.azure_cli_status_label.setText(
+            _("%s installation in progress...") % label
+        )
+        self.azure_cli_status_label.setStyleSheet(
+            f"font-size: 13px; color: {'#ffcc66' if colorMode == 'dark' else '#8a6d3b'};"
+        )
+
+        def worker():
+            try:
+                installer()
+                self.azure_install_finished.emit(component_name, True, _("%s install completed.") % label)
+            except Exception as exc:
+                self.azure_install_finished.emit(component_name, False, str(exc))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    @QtCore.Slot(str, bool, str)
+    def _finish_azure_install(self, component, success, message):
+        self._azure_install_in_progress = False
+        cli_available = bool(azure_cli_path())
+        powershell_available = azure_powershell_available()
+        cli_status = _("Azure CLI detected.") if cli_available else _("Azure CLI is not installed.")
+        powershell_status = (
+            _("Azure PowerShell detected.") if powershell_available
+            else _("Azure PowerShell is not installed (optional).")
+        )
+
+        if self.azure_cli_install_button is not None:
+            self.azure_cli_install_button.setEnabled(True)
+            self.azure_cli_install_button.setVisible(not cli_available)
+        if self.azure_powershell_install_button is not None:
+            self.azure_powershell_install_button.setEnabled(True)
+            self.azure_powershell_install_button.setVisible(not powershell_available)
+        if not success:
+            install_url = (
+                AZURE_CLI_INSTALL_URL if component == "cli" else AZURE_POWERSHELL_INSTALL_URL
+            )
+            webbrowser.open(install_url)
+            QtWidgets.QMessageBox.warning(
+                self,
+                _("Azure installation failed"),
+                message + _("\n\nWe tried automated install and opened the official installer guide."),
+            )
+
+        color = '#63d471' if success else '#d93025'
+        self.azure_cli_status_label.setText(f"{cli_status} {powershell_status}")
+        self.azure_cli_status_label.setStyleSheet(
+            f"font-size: 13px; color: {color};"
+        )
+
+        if success and not cli_available and component == "cli":
+            self.azure_cli_status_label.setText(
+                _("%s\n%s") % (_("%s install completed.") % _("Azure CLI"), f"{cli_status} {powershell_status}")
+            )
+        if success and not powershell_available and component == "powershell":
+            self.azure_cli_status_label.setText(
+                _("%s\n%s") % (_("%s install completed.") % _("Azure PowerShell"), f"{cli_status} {powershell_status}")
+            )
+
+        if not success:
+            self.azure_cli_status_label.setStyleSheet(
+                f"font-size: 13px; color: {'#d93025'};"
+            )
 
     @QtCore.Slot(bool, str)
     def _finish_azure_usage_check(self, success, message):
