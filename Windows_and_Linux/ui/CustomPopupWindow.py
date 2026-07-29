@@ -764,6 +764,21 @@ class CustomPopupWindow(QtWidgets.QWidget):
             if col > 1:
                 col = 0
                 row += 1
+
+        if not self.edit_mode:
+            copy_button = QtWidgets.QToolButton()
+            copy_icon = os.path.join(
+                os.path.dirname(sys.argv[0]),
+                'icons',
+                'copy' + ('_dark' if colorMode == 'dark' else '_light') + '.png'
+            )
+            if os.path.exists(copy_icon):
+                copy_button.setIcon(QtGui.QIcon(copy_icon))
+            copy_button.setIconSize(QtCore.QSize(20, 20))
+            copy_button.setToolTip(_("Copy selected text"))
+            copy_button.setFixedSize(34, 34)
+            copy_button.clicked.connect(self.copy_selected_text)
+            grid.addWidget(copy_button, row, col)
         
         parent_layout.addLayout(grid)
         
@@ -787,6 +802,12 @@ class CustomPopupWindow(QtWidgets.QWidget):
             """)
             add_btn.clicked.connect(self.add_new_button_clicked)
             parent_layout.addWidget(add_btn)
+
+    def copy_selected_text(self):
+        holder = getattr(self.app, "current_text_holder", None)
+        text = getattr(holder, "text", "") if holder else ""
+        if text:
+            QtWidgets.QApplication.clipboard().setText(text)
 
     def add_edit_delete_icons(self, btn):
         """Add edit/delete icons as overlays with proper spacing."""

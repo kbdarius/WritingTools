@@ -304,6 +304,15 @@ class WritingToolApp(QtWidgets.QApplication):
         self.save_config(self.config)
         return rate
 
+    def set_read_aloud_rate(self, rate):
+        rate = float(rate)
+        service = self._get_read_aloud_service()
+        if hasattr(service, "set_rate"):
+            rate = service.set_rate(rate)
+        self.config["read_aloud_rate"] = rate
+        self.save_config(self.config)
+        return rate
+
     def can_pause_read_aloud(self):
         return hasattr(self._get_read_aloud_service(), "toggle_pause")
 
@@ -881,6 +890,15 @@ class WritingToolApp(QtWidgets.QApplication):
             self.output_queue = ""
 
         self._remember_target_window()
+
+        fast_track = self.config.get('fast_track_action', '')
+        fast_config = self.options.get(fast_track, {})
+        if fast_track and fast_config.get('visible', True):
+            QtCore.QMetaObject.invokeMethod(
+                self, "_fire_button_directly", QtCore.Qt.ConnectionType.QueuedConnection,
+                QtCore.Q_ARG(str, fast_track)
+            )
+            return
 
         # noinspection PyTypeChecker
         QtCore.QMetaObject.invokeMethod(self, "_show_popup", QtCore.Qt.ConnectionType.QueuedConnection)

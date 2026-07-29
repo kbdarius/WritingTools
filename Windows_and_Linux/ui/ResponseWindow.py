@@ -389,10 +389,14 @@ class ResponseWindow(QtWidgets.QWidget):
         
         copy_md_btn = QtWidgets.QPushButton(_("Copy as Markdown"))
         copy_md_btn.setStyleSheet(self.get_button_style())
-        copy_md_btn.clicked.connect(self.copy_first_response)  # Updated to only copy first response
+        copy_md_btn.clicked.connect(self.copy_latest_response)
         copy_bar.addWidget(copy_md_btn)
 
-        read_aloud_btn = QtWidgets.QPushButton(_("Read Aloud"))
+        read_aloud_btn = QtWidgets.QToolButton()
+        read_aloud_btn.setIcon(self.style().standardIcon(QtWidgets.QStyle.StandardPixmap.SP_MediaVolume))
+        read_aloud_btn.setIconSize(QtCore.QSize(20, 20))
+        read_aloud_btn.setFixedSize(30, 30)
+        read_aloud_btn.setToolTip(_("Read Aloud"))
         read_aloud_btn.setStyleSheet(self.get_button_style())
         read_aloud_btn.clicked.connect(self.read_aloud_current_response)
         copy_bar.addWidget(read_aloud_btn)
@@ -500,6 +504,11 @@ class ResponseWindow(QtWidgets.QWidget):
         if response_text:
             QtWidgets.QApplication.clipboard().setText(response_text)
 
+    def copy_latest_response(self):
+        response_text = self.get_latest_assistant_response()
+        if response_text:
+            QtWidgets.QApplication.clipboard().setText(response_text)
+
     def read_aloud_current_response(self):
         """Read the most recent assistant response aloud."""
         response_text = self.get_latest_assistant_response()
@@ -522,7 +531,7 @@ class ResponseWindow(QtWidgets.QWidget):
 
     def insert_first_response(self):
         """Return focus to the previous app and replace its selection/cursor."""
-        response_text = self.get_first_response_text()
+        response_text = self.get_latest_assistant_response()
         if response_text:
             self.app.insert_text_at_cursor(response_text, self)
 
@@ -699,11 +708,10 @@ class ResponseWindow(QtWidgets.QWidget):
                 text_display.zoom_factor = self.current_text_display.zoom_factor
                 text_display._apply_zoom()
             
-            if len(self.chat_history) > 0 and self.chat_history[-1]["role"] != "assistant":
-                self.chat_history.append({
-                    "role": "assistant",
-                    "content": response_text
-                })
+            if self.chat_history and self.chat_history[-1]["role"] == "assistant":
+                self.chat_history[-1]["content"] = response_text
+            else:
+                self.chat_history.append({"role": "assistant", "content": response_text})
         
         self.stop_thinking_animation()
         self.input_field.setEnabled(True)

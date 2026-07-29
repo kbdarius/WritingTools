@@ -302,6 +302,21 @@ class SettingsWindow(QtWidgets.QWidget):
             button_visibility_button.clicked.connect(self.show_button_visibility_dialog)
             content_layout.addWidget(button_visibility_button)
 
+            fast_track_label = QtWidgets.QLabel(_("Ctrl+Space fast track:"))
+            content_layout.addWidget(fast_track_label)
+            self.fast_track_dropdown = NoWheelComboBox()
+            self.fast_track_dropdown.addItem(_("Off"), "")
+            for name, config in (self.app.options or {}).items():
+                if config.get('visible', True):
+                    self.fast_track_dropdown.addItem(name, name)
+            fast_track = self.app.config.get('fast_track_action', '')
+            fast_index = self.fast_track_dropdown.findData(fast_track)
+            self.fast_track_dropdown.setCurrentIndex(max(0, fast_index))
+            self.fast_track_dropdown.setToolTip(
+                _("Choose one visible action to run automatically when Ctrl+Space is pressed.")
+            )
+            content_layout.addWidget(self.fast_track_dropdown)
+
             self.review_before_insert_checkbox = QtWidgets.QCheckBox(
                 "Review results before inserting"
             )
@@ -446,6 +461,16 @@ class SettingsWindow(QtWidgets.QWidget):
             f"font-size: 14px; color: {'#cccccc' if colorMode == 'dark' else '#555555'};"
         )
         content_layout.addWidget(read_aloud_intro)
+
+        speed_row = QHBoxLayout()
+        speed_row.addWidget(QtWidgets.QLabel(_("Reading speed:")))
+        self.read_aloud_speed_dropdown = NoWheelComboBox()
+        for rate in (0.75, 1.0, 1.25, 1.5, 2.0):
+            self.read_aloud_speed_dropdown.addItem(f"{rate:g}x", rate)
+        saved_rate = float(self.app.config.get('read_aloud_rate', 1.0))
+        self.read_aloud_speed_dropdown.setCurrentIndex(max(0, self.read_aloud_speed_dropdown.findData(saved_rate)))
+        speed_row.addWidget(self.read_aloud_speed_dropdown)
+        content_layout.addLayout(speed_row)
 
         azure_settings = self.app.config.get('azure_speech', {})
 
@@ -992,9 +1017,11 @@ class SettingsWindow(QtWidgets.QWidget):
 
         if not self.providers_only:
             self.app.config['shortcut'] = self.shortcut_input.text()
+            self.app.config['fast_track_action'] = self.fast_track_dropdown.currentData()
             self.app.config['theme'] = 'gradient' if self.gradient_radio.isChecked() else 'plain'
             self.app.config['review_before_insert'] = self.review_before_insert_checkbox.isChecked()
             self.app.config['read_aloud_provider'] = self.read_aloud_provider_dropdown.currentData()
+            self.app.set_read_aloud_rate(self.read_aloud_speed_dropdown.currentData())
             self.app.config['azure_speech'] = {
                 'key': self.azure_speech_key_input.text().strip(),
                 'region': self.azure_speech_region_input.text().strip(),

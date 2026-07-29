@@ -43,7 +43,7 @@ class SpeechControlWindow(QtWidgets.QWidget):
         )
         self.speed_button = QtWidgets.QToolButton()
         self.speed_button.setFixedSize(48, 34)
-        self.speed_button.clicked.connect(self._cycle_speed)
+        self.speed_button.clicked.connect(self._choose_speed)
         self.set_speed(self.app.get_read_aloud_rate())
         self.settings_button = self._button(
             style.standardIcon(QtWidgets.QStyle.StandardPixmap.SP_FileDialogDetailedView),
@@ -97,7 +97,7 @@ class SpeechControlWindow(QtWidgets.QWidget):
         self.rewind_button.setEnabled(False)
         self.pause_button.setEnabled(False)
         self.forward_button.setEnabled(False)
-        self.speed_button.setEnabled(False)
+        self.speed_button.setEnabled(True)
 
     def set_playing(self, message="Reading with Azure Speech..."):
         self.setToolTip(message)
@@ -125,11 +125,17 @@ class SpeechControlWindow(QtWidgets.QWidget):
         label = f"{rate:g}x"
         self.speed_button.setText(label)
         self.speed_button.setToolTip(
-            f"Reading speed: {label}. Click to change."
+            f"Reading speed: {label}. Click to choose a speed."
         )
 
-    def _cycle_speed(self):
-        self.set_speed(self.app.cycle_read_aloud_rate())
+    def _choose_speed(self):
+        menu = QtWidgets.QMenu(self)
+        for rate in (0.75, 1.0, 1.25, 1.5, 2.0):
+            action = menu.addAction(f"{rate:g}x")
+            action.setCheckable(True)
+            action.setChecked(abs(rate - self.app.get_read_aloud_rate()) < 0.01)
+            action.triggered.connect(lambda _checked=False, value=rate: self.set_speed(self.app.set_read_aloud_rate(value)))
+        menu.exec(self.speed_button.mapToGlobal(QtCore.QPoint(0, -menu.sizeHint().height())))
 
     def close_without_cancel(self):
         """Close during normal cleanup without sending a second stop request."""
