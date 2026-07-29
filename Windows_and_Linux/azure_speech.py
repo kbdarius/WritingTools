@@ -25,6 +25,10 @@ ErrorCallback = Optional[Callable[[str], None]]
 
 
 _URL_RE = re.compile(r"(?i)\b(?:https?://|www\.)[^\s<>]+")
+_EMAIL_RE = re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")
+_UUID_RE = re.compile(
+    r"(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b"
+)
 _FENCED_CODE_RE = re.compile(r"```.*?```", re.DOTALL)
 _INLINE_CODE_RE = re.compile(r"`([^`]+)`")
 _PATH_RE = re.compile(r"(?<!\w)(?:[A-Za-z]:)?(?:[\\/][^\s<>]+|[A-Za-z0-9_.-]+(?:[\\/][^\s<>]+)+)")
@@ -45,7 +49,9 @@ def prepare_text_for_speech(text: str, natural_reading: bool = True) -> str:
     if not natural_reading or not cleaned:
         return cleaned
 
-    cleaned = _FENCED_CODE_RE.sub(". Code block omitted. ", cleaned)
+    # Code is intentionally omitted rather than announced; the user asked
+    # for prose-only listening, and even a short announcement is noise.
+    cleaned = _FENCED_CODE_RE.sub(" ", cleaned)
 
     def url_replacement(match: re.Match) -> str:
         value = match.group(0)
@@ -56,6 +62,8 @@ def prepare_text_for_speech(text: str, natural_reading: bool = True) -> str:
         return " a web link " + trailing
 
     cleaned = _URL_RE.sub(url_replacement, cleaned)
+    cleaned = _EMAIL_RE.sub(" ", cleaned)
+    cleaned = _UUID_RE.sub(" ", cleaned)
     cleaned = _INLINE_CODE_RE.sub(r" \1 ", cleaned)
     cleaned = _PATH_RE.sub(" a file ", cleaned)
 
@@ -75,6 +83,7 @@ def prepare_text_for_speech(text: str, natural_reading: bool = True) -> str:
     cleaned = re.sub(r"(?<=[A-Za-z0-9])[/\\]+(?=[A-Za-z0-9])", " ", cleaned)
     cleaned = re.sub(r"(?<=[A-Za-z0-9])[_#]+(?=[A-Za-z0-9])", " ", cleaned)
     cleaned = re.sub(r"\s+([,.;:!?])", r"\1", cleaned)
+    cleaned = re.sub(r"([:;,])\.", ".", cleaned)
     cleaned = re.sub(r"\.{2,}", ".", cleaned)
     cleaned = " ".join(cleaned.split()).strip()
     return cleaned.lstrip(". ").strip()
