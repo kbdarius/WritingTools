@@ -477,6 +477,39 @@ class SettingsWindow(QtWidgets.QWidget):
 
         # Provider controls live on the AI Provider tab.
         content_layout = ai_layout
+        ai_cards_layout = ai_layout
+        provider_title = QtWidgets.QLabel(_("AI and speech setup"))
+        provider_title.setStyleSheet(
+            f"font-size: 24px; font-weight: 700; color: {'#ffffff' if colorMode == 'dark' else '#182230'};"
+        )
+        content_layout.addWidget(provider_title)
+        provider_subtitle = QtWidgets.QLabel(
+            _("Choose the AI that writes for you, then configure the voice that reads text aloud.")
+        )
+        provider_subtitle.setWordWrap(True)
+        provider_subtitle.setStyleSheet(
+            f"font-size: 14px; color: {'#c7cbd1' if colorMode == 'dark' else '#667085'};"
+        )
+        content_layout.addWidget(provider_subtitle)
+
+        def create_provider_card():
+            card = QtWidgets.QFrame()
+            card.setObjectName("providerCard")
+            card.setStyleSheet(f"""
+                QFrame#providerCard {{
+                    background: {'rgba(42, 42, 42, 0.78)' if colorMode == 'dark' else 'rgba(255, 255, 255, 0.93)'};
+                    border: 1px solid {'#5c6570' if colorMode == 'dark' else '#d8dee8'};
+                    border-radius: 12px;
+                }}
+            """)
+            layout = QtWidgets.QVBoxLayout(card)
+            layout.setContentsMargins(18, 16, 18, 18)
+            layout.setSpacing(10)
+            ai_cards_layout.addWidget(card)
+            return layout
+
+        speech_layout = create_provider_card()
+        content_layout = speech_layout
         read_aloud_label = QtWidgets.QLabel(_("Read Aloud"))
         read_aloud_label.setStyleSheet(
             f"font-size: 18px; font-weight: bold; color: {'#ffffff' if colorMode == 'dark' else '#333333'};"
@@ -642,6 +675,22 @@ class SettingsWindow(QtWidgets.QWidget):
             )
             content_layout.addWidget(self.azure_powershell_install_button)
 
+        writing_layout = create_provider_card()
+        content_layout = writing_layout
+        writing_label = QtWidgets.QLabel(_("Writing AI"))
+        writing_label.setStyleSheet(
+            f"font-size: 18px; font-weight: bold; color: {'#ffffff' if colorMode == 'dark' else '#333333'};"
+        )
+        content_layout.addWidget(writing_label)
+        writing_intro = QtWidgets.QLabel(
+            _("This provider handles Rewrite, prompts, and follow-up requests. Select one, then enter only the credentials it needs.")
+        )
+        writing_intro.setWordWrap(True)
+        writing_intro.setStyleSheet(
+            f"font-size: 14px; color: {'#cccccc' if colorMode == 'dark' else '#555555'};"
+        )
+        content_layout.addWidget(writing_intro)
+
         # Add provider selection
         provider_label = QtWidgets.QLabel(_("Choose AI Provider:"))
         provider_label.setStyleSheet(f"font-size: 16px; color: {'#ffffff' if colorMode == 'dark' else '#333333'};")
@@ -663,14 +712,9 @@ class SettingsWindow(QtWidgets.QWidget):
         self.provider_dropdown.setCurrentIndex(self.provider_dropdown.findText(current_provider))
         content_layout.addWidget(self.provider_dropdown)
 
-        # Add horizontal separator
-        line = QtWidgets.QFrame()
-        line.setFrameShape(QtWidgets.QFrame.Shape.HLine)
-        line.setFrameShadow(QtWidgets.QFrame.Shadow.Sunken)
-        content_layout.addWidget(line)
-
         # Create container for provider UI
         self.provider_container = QtWidgets.QVBoxLayout()
+        self.provider_container.setSpacing(10)
         content_layout.addLayout(self.provider_container)
 
         # Initialize provider UI
@@ -686,16 +730,10 @@ class SettingsWindow(QtWidgets.QWidget):
             self._provider_selection_changed
         )
 
-        test_button = QtWidgets.QPushButton(_("Test Connection"))
+        test_button = QtWidgets.QPushButton(_("Test writing AI connection"))
         test_button.setToolTip(_("Verify that the selected credentials can reach the selected model."))
         test_button.clicked.connect(self.test_provider_connection)
         content_layout.addWidget(test_button)
-
-        # Add horizontal separator
-        line = QtWidgets.QFrame()
-        line.setFrameShape(QtWidgets.QFrame.Shape.HLine)
-        line.setFrameShadow(QtWidgets.QFrame.Shadow.Sunken)
-        content_layout.addWidget(line)
 
         # Create bottom container for save button and restart notice
         bottom_container = QtWidgets.QWidget()
