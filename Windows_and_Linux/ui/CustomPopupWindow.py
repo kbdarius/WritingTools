@@ -171,6 +171,48 @@ class PopupButtonVisibilityDialog(QDialog):
         self.accept()
 
 
+class PinnedTextEditorDialog(QDialog):
+    """Edit one pinned text item and its optional display label."""
+
+    def __init__(self, parent=None, entry=None, title="Pinned Text"):
+        super().__init__(parent)
+        entry = entry or {}
+        self.setWindowTitle(title)
+        self.setMinimumWidth(520)
+
+        layout = QVBoxLayout(self)
+
+        label_caption = QLabel("Label (optional):")
+        label_caption.setStyleSheet(
+            f"color: {'#fff' if colorMode == 'dark' else '#333'}; font-weight: bold;"
+        )
+        layout.addWidget(label_caption)
+        self.label_input = QLineEdit(entry.get("label", ""))
+        self.label_input.setPlaceholderText("Example: Company introduction")
+        layout.addWidget(self.label_input)
+
+        text_caption = QLabel("Text:")
+        text_caption.setStyleSheet(
+            f"color: {'#fff' if colorMode == 'dark' else '#333'}; font-weight: bold;"
+        )
+        layout.addWidget(text_caption)
+        self.text_input = QPlainTextEdit()
+        self.text_input.setPlainText(entry.get("text", ""))
+        self.text_input.setMinimumHeight(180)
+        layout.addWidget(self.text_input)
+
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Cancel
+            | QtWidgets.QDialogButtonBox.StandardButton.Save
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def values(self):
+        return self.text_input.toPlainText(), self.label_input.text().strip()
+
+
 class PinnedTextDialog(QDialog):
     """Local pinned text library that stays independent from Windows Win+V."""
 
@@ -197,6 +239,7 @@ class PinnedTextDialog(QDialog):
         body = QHBoxLayout()
         self.list_widget = QListWidget()
         self.list_widget.currentRowChanged.connect(self._update_preview)
+        self.list_widget.itemDoubleClicked.connect(lambda _: self._edit_selected())
         self.list_widget.setMinimumWidth(240)
         body.addWidget(self.list_widget, 1)
 
@@ -236,13 +279,9 @@ class PinnedTextDialog(QDialog):
         add_manual_button.clicked.connect(self._add_manual)
         action_row.addWidget(add_manual_button)
 
-        copy_button = QPushButton("Copy")
-        copy_button.clicked.connect(self._copy_selected)
-        action_row.addWidget(copy_button)
-
-        paste_button = QPushButton("Paste")
-        paste_button.clicked.connect(self._paste_selected)
-        action_row.addWidget(paste_button)
+        edit_button = QPushButton("Edit")
+        edit_button.clicked.connect(self._edit_selected)
+        action_row.addWidget(edit_button)
 
         delete_button = QPushButton("Delete")
         delete_button.clicked.connect(self._delete_selected)
@@ -263,9 +302,7 @@ class PinnedTextDialog(QDialog):
             summary = " ".join(text.split())
             if len(summary) > 60:
                 summary = summary[:60] + "..."
-            label = summary or "(blank)"
-            if entry.get("source") == "clipboard":
-                label = f"[Clipboard] {label}"
+            label = (entry.get("label") or "").strip() or summary or "(blank)"
             item = QListWidgetItem(label)
             item.setData(Qt.ItemDataRole.UserRole, entry)
             self.list_widget.addItem(item)
@@ -300,7 +337,7 @@ class PinnedTextDialog(QDialog):
     def _save(self):
         CustomPopupWindow.save_pinned_texts(self.entries)
 
-    def _store_text(self, text, source):
+    def _store_text(self, text, source, label=""):
         text = (text or "").strip()
         if not text:
             QtWidgets.QMessageBox.information(self, "Pinned Text Library", "Nothing to add.")
@@ -315,6 +352,7 @@ class PinnedTextDialog(QDialog):
 
         self.entries.insert(0, {
             "text": text,
+            "label": (label or "").strip(),
             "source": source,
             "created_at": QtCore.QDateTime.currentDateTimeUtc().toString(QtCore.Qt.DateFormat.ISODate),
         })
@@ -323,32 +361,33 @@ class PinnedTextDialog(QDialog):
 
     def _add_current_clipboard(self):
         text = QtWidgets.QApplication.clipboard().text()
-        self._store_text(text, "clipboard")
+        self._edit_entry({"text": text, "source": "clipboard"}, source="clipboard")
 
     def _add_manual(self):
-        text, ok = QInputDialog.getMultiLineText(
-            self,
-            "Add Pinned Text",
-            "Paste or type the text you want to keep pinned:",
-        )
-        if ok:
-            self._store_text(text, "manual")
+        self._edit_entry({"source": "manual"}, source="manual")
 
-    def _copy_selected(self):
-        _, entry = self._selected_entry()
-        if not entry:
+    def _edit_entry(self, entry, source=None, index=None):
+        dialog = PinnedTextEditorDialog(self, entry, "Edit Pinned Text" if index is not None else "Add Pinned Text")
+        if dialog.exec() != QDialog.DialogCode.Accepted:
             return
-        QtWidgets.QApplication.clipboard().setText(entry.get("text", ""))
+        text, label = dialog.values()
+        text = text.strip()
+        if not text:
+            QtWidgets.QMessageBox.information(self, "Pinned Text Library", "Text cannot be blank.")
+            return
 
-    def _paste_selected(self):
-        _, entry = self._selected_entry()
-        if not entry:
+        if index is None:
+            self._store_text(text, source or entry.get("source", "manual"), label)
             return
-        text = entry.get("text", "")
-        if hasattr(self.popup.app, "_restore_target_and_paste"):
-            self.popup.app._restore_target_and_paste(text)
-        else:
-            QtWidgets.QApplication.clipboard().setText(text)
+
+        self.entries[index].update({"text": text, "label": label})
+        self._save()
+        self._refresh_list(index)
+
+    def _edit_selected(self):
+        index, entry = self._selected_entry()
+        if entry:
+            self._edit_entry(entry.copy(), index=index)
 
     def _delete_selected(self):
         index, entry = self._selected_entry()
@@ -720,7 +759,8 @@ class CustomPopupWindow(QtWidgets.QWidget):
                 background-color: {'#333' if colorMode=='dark' else '#ebebeb'};
             }}
         """)
-        self.edit_button.clicked.connect(self.toggle_edit_mode)
+        self.edit_button.setToolTip(_("Edit popup buttons or manage pinned text"))
+        self.edit_button.clicked.connect(self.show_pencil_menu)
         top_bar.addWidget(self.edit_button, 0, Qt.AlignLeft)
 
         self.list_button = QPushButton()
@@ -743,8 +783,8 @@ class CustomPopupWindow(QtWidgets.QWidget):
                 background-color: {'#333' if colorMode=='dark' else '#ebebeb'};
             }}
         """)
-        self.list_button.setToolTip(_("Pinned text library"))
-        self.list_button.clicked.connect(self.show_pinned_text_library)
+        self.list_button.setToolTip(_("Choose pinned text to paste"))
+        self.list_button.clicked.connect(self.show_pinned_text_picker)
         top_bar.addWidget(self.list_button, 0, Qt.AlignLeft)
 
         # The label "Drag to rearrange" (BOLD as requested)
@@ -1173,6 +1213,47 @@ class CustomPopupWindow(QtWidgets.QWidget):
     def show_pinned_text_library(self):
         dialog = PinnedTextDialog(self, self)
         dialog.exec()
+
+    def show_pencil_menu(self):
+        if self.edit_mode:
+            self.toggle_edit_mode()
+            return
+
+        menu = QtWidgets.QMenu(self)
+        edit_actions = menu.addAction(_("Edit popup buttons"))
+        manage_pinned = menu.addAction(_("Manage pinned text"))
+        chosen = menu.exec(self.edit_button.mapToGlobal(self.edit_button.rect().bottomLeft()))
+        if chosen is edit_actions:
+            self.toggle_edit_mode()
+        elif chosen is manage_pinned:
+            self.show_pinned_text_library()
+
+    def show_pinned_text_picker(self):
+        menu = QtWidgets.QMenu(self)
+        entries = self.load_pinned_texts()
+        if not entries:
+            empty_action = menu.addAction(_("No pinned text saved"))
+            empty_action.setEnabled(False)
+        else:
+            for entry in entries:
+                text = " ".join((entry.get("text") or "").split())
+                label = (entry.get("label") or "").strip() or text[:60] or _("(blank)")
+                if len(label) > 60:
+                    label = label[:60] + "..."
+                action = menu.addAction(label)
+                action.setToolTip(text)
+                action.triggered.connect(partial(self.paste_pinned_text, entry.get("text", "")))
+            menu.addSeparator()
+            manage_action = menu.addAction(_("Manage pinned text..."))
+            manage_action.triggered.connect(self.show_pinned_text_library)
+
+        menu.exec(self.list_button.mapToGlobal(self.list_button.rect().bottomLeft()))
+
+    def paste_pinned_text(self, text):
+        if hasattr(self.app, "_restore_target_and_paste"):
+            self.app._restore_target_and_paste(text)
+        else:
+            QtWidgets.QApplication.clipboard().setText(text)
 
     @staticmethod
     def pinned_texts_path():
