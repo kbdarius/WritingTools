@@ -1,4 +1,4 @@
-"""Compact, non-activating controls for Read Aloud playback."""
+"""Compact controls for Read Aloud playback."""
 
 from PySide6 import QtCore, QtGui, QtWidgets
 from version import APP_VERSION
@@ -16,9 +16,7 @@ class SpeechControlWindow(QtWidgets.QWidget):
             QtCore.Qt.WindowType.Tool
             | QtCore.Qt.WindowType.FramelessWindowHint
             | QtCore.Qt.WindowType.WindowStaysOnTopHint
-            | QtCore.Qt.WindowType.WindowDoesNotAcceptFocus
         )
-        self.setAttribute(QtCore.Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setFixedHeight(46)
 
         layout = QtWidgets.QHBoxLayout(self)
