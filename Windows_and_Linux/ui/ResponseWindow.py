@@ -387,9 +387,18 @@ class ResponseWindow(QtWidgets.QWidget):
         copy_bar.addWidget(copy_hint)
         copy_bar.addStretch()
         
-        copy_md_btn = QtWidgets.QPushButton(_("Copy as Markdown"))
-        copy_md_btn.setStyleSheet(self.get_button_style())
-        copy_md_btn.clicked.connect(self.copy_latest_response)
+        copy_md_btn = QtWidgets.QToolButton()
+        copy_icon = os.path.join(
+            os.path.dirname(sys.argv[0]), 'icons',
+            'copy' + ('_dark' if colorMode == 'dark' else '_light') + '.png'
+        )
+        if os.path.exists(copy_icon):
+            copy_md_btn.setIcon(QtGui.QIcon(copy_icon))
+        copy_md_btn.setIconSize(QtCore.QSize(20, 20))
+        copy_md_btn.setFixedSize(30, 30)
+        copy_md_btn.setToolTip(_("Copy latest rewrite"))
+        copy_md_btn.setStyleSheet(self.get_icon_button_style())
+        copy_md_btn.clicked.connect(lambda: self.copy_latest_response(copy_md_btn))
         copy_bar.addWidget(copy_md_btn)
 
         read_aloud_btn = QtWidgets.QToolButton()
@@ -397,13 +406,21 @@ class ResponseWindow(QtWidgets.QWidget):
         read_aloud_btn.setIconSize(QtCore.QSize(20, 20))
         read_aloud_btn.setFixedSize(30, 30)
         read_aloud_btn.setToolTip(_("Read Aloud"))
-        read_aloud_btn.setStyleSheet(self.get_button_style())
+        read_aloud_btn.setStyleSheet(self.get_icon_button_style())
         read_aloud_btn.clicked.connect(self.read_aloud_current_response)
         copy_bar.addWidget(read_aloud_btn)
 
-        insert_btn = QtWidgets.QPushButton(_("Insert at cursor"))
-        insert_btn.setStyleSheet(self.get_button_style())
-        insert_btn.setToolTip("Close this result and paste it where your cursor was")
+        insert_btn = QtWidgets.QToolButton()
+        insert_icon = os.path.join(
+            os.path.dirname(sys.argv[0]), 'icons',
+            'send' + ('_dark' if colorMode == 'dark' else '_light') + '.png'
+        )
+        if os.path.exists(insert_icon):
+            insert_btn.setIcon(QtGui.QIcon(insert_icon))
+        insert_btn.setIconSize(QtCore.QSize(20, 20))
+        insert_btn.setFixedSize(30, 30)
+        insert_btn.setStyleSheet(self.get_icon_button_style())
+        insert_btn.setToolTip(_("Insert latest rewrite at cursor"))
         insert_btn.clicked.connect(self.insert_first_response)
         copy_bar.addWidget(insert_btn)
         content_layout.addLayout(copy_bar)
@@ -504,10 +521,15 @@ class ResponseWindow(QtWidgets.QWidget):
         if response_text:
             QtWidgets.QApplication.clipboard().setText(response_text)
 
-    def copy_latest_response(self):
+    def copy_latest_response(self, button=None):
         response_text = self.get_latest_assistant_response()
         if response_text:
             QtWidgets.QApplication.clipboard().setText(response_text)
+            if button is not None:
+                button.setIconSize(QtCore.QSize(24, 24))
+                button.setToolTip(_("Copied"))
+                QtCore.QTimer.singleShot(180, lambda: button.setIconSize(QtCore.QSize(20, 20)))
+                QtCore.QTimer.singleShot(1200, lambda: button.setToolTip(_("Copy latest rewrite")))
 
     def read_aloud_current_response(self):
         """Read the most recent assistant response aloud."""
@@ -560,6 +582,22 @@ class ResponseWindow(QtWidgets.QWidget):
             }}
             QPushButton:hover {{
                 background-color: {'#555' if colorMode == 'dark' else '#e0e0e0'};
+            }}
+        """
+
+    def get_icon_button_style(self):
+        return f"""
+            QToolButton {{
+                background-color: {'#444' if colorMode == 'dark' else '#f0f0f0'};
+                border: 1px solid {'#666' if colorMode == 'dark' else '#ccc'};
+                border-radius: 6px;
+                padding: 4px;
+            }}
+            QToolButton:hover {{
+                background-color: {'#555' if colorMode == 'dark' else '#e0e0e0'};
+            }}
+            QToolButton:pressed {{
+                padding: 6px;
             }}
         """
 

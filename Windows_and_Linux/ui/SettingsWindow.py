@@ -197,6 +197,33 @@ class SettingsWindow(QtWidgets.QWidget):
         # Set the exact width we want (592px) as both minimum and default
         self.setMinimumWidth(592)
         self.setFixedWidth(592)  # This makes the width non-resizable
+        self.setStyleSheet(f"""
+            QTabWidget::pane {{
+                border: 1px solid {'#555' if colorMode == 'dark' else '#d0d5dd'};
+                border-radius: 12px;
+                background: {'rgba(30,30,30,0.72)' if colorMode == 'dark' else 'rgba(255,255,255,0.82)'};
+            }}
+            QTabBar::tab {{
+                background: {'#303030' if colorMode == 'dark' else '#e8edf3'};
+                color: {'#d8d8d8' if colorMode == 'dark' else '#344054'};
+                padding: 10px 18px;
+                margin-right: 3px;
+                border-radius: 8px 8px 0 0;
+            }}
+            QTabBar::tab:selected {{
+                background: {'#4b77a5' if colorMode == 'dark' else '#ffffff'};
+                color: {'#ffffff' if colorMode == 'dark' else '#1d2939'};
+                font-weight: bold;
+            }}
+            QScrollArea {{ border: none; background: transparent; }}
+            QLineEdit, QPlainTextEdit, QComboBox {{
+                border: 1px solid {'#626262' if colorMode == 'dark' else '#c6cbd3'};
+                border-radius: 7px;
+                padding: 7px;
+            }}
+            QCheckBox {{ spacing: 8px; }}
+            QPushButton {{ min-height: 30px; }}
+        """)
 
         # Set up the main window layout with spacing for bottom elements
         UIUtils.setup_window_and_layout(self)
@@ -235,10 +262,13 @@ class SettingsWindow(QtWidgets.QWidget):
             scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
             scroll.setStyleSheet(scroll_style)
             content = QtWidgets.QWidget()
-            content.setStyleSheet("background: transparent;")
+            content.setStyleSheet(
+                f"background: {'rgba(18,18,18,0.32)' if colorMode == 'dark' else 'rgba(248,250,252,0.62)'};"
+                "border-radius: 10px;"
+            )
             layout = QtWidgets.QVBoxLayout(content)
-            layout.setContentsMargins(30, 25, 30, 25)
-            layout.setSpacing(16)
+            layout.setContentsMargins(26, 24, 26, 28)
+            layout.setSpacing(14)
             scroll.setWidget(content)
             return scroll, layout
 

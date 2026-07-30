@@ -351,7 +351,7 @@ class DraggableButton(QtWidgets.QPushButton):
         self.setProperty("hover", False)
 
         # Set fixed size (adjust as needed)
-        self.setFixedSize(120, 40)
+        self.setFixedSize(42, 40)
 
         # Define base style using the dynamic property instead of the :hover pseudo-class
         self.base_style = f"""
@@ -361,7 +361,7 @@ class DraggableButton(QtWidgets.QPushButton):
                 border-radius: 8px;
                 padding: 10px;
                 font-size: 14px;
-                text-align: left;
+                text-align: center;
                 color: {"#fff" if colorMode=="dark" else "#000"};
             }}
             QPushButton[hover="true"] {{
@@ -708,6 +708,9 @@ class CustomPopupWindow(QtWidgets.QWidget):
             if k == "Custom" or not v.get("visible", True):
                 continue
             b = DraggableButton(self, k, k)
+            b.setText("")
+            b.setIconSize(QtCore.QSize(24, 24))
+            b.setToolTip(k)
             if v.get("icon") == "builtin:speaker":
                 b.setIcon(self.style().standardIcon(
                     QtWidgets.QStyle.StandardPixmap.SP_MediaVolume
@@ -722,7 +725,7 @@ class CustomPopupWindow(QtWidgets.QWidget):
             # Buttons without a hotkey get no tooltip — keeps things uncluttered.
             hotkey = (v.get("hotkey") or "").strip()
             if hotkey:
-                b.setToolTip(f"Direct hotkey: {hotkey}")
+                b.setToolTip(f"{k} (Direct hotkey: {hotkey})")
             elif v.get("action") == "read_aloud":
                 b.setToolTip("Read the selected text locally with Sarah")
 
@@ -751,9 +754,9 @@ class CustomPopupWindow(QtWidgets.QWidget):
 
         # Create new grid with fixed column width
         grid = QtWidgets.QGridLayout()
-        grid.setSpacing(10)  
-        grid.setColumnMinimumWidth(0, 120)
-        grid.setColumnMinimumWidth(1, 120)
+        grid.setSpacing(6)
+        grid.setColumnMinimumWidth(0, 42)
+        grid.setColumnMinimumWidth(1, 42)
         
         # Add buttons to grid
         row = 0
@@ -777,7 +780,7 @@ class CustomPopupWindow(QtWidgets.QWidget):
             copy_button.setIconSize(QtCore.QSize(20, 20))
             copy_button.setToolTip(_("Copy selected text"))
             copy_button.setFixedSize(34, 34)
-            copy_button.clicked.connect(self.copy_selected_text)
+            copy_button.clicked.connect(lambda: self.copy_selected_text(copy_button))
             grid.addWidget(copy_button, row, col)
         
         parent_layout.addLayout(grid)
@@ -803,11 +806,16 @@ class CustomPopupWindow(QtWidgets.QWidget):
             add_btn.clicked.connect(self.add_new_button_clicked)
             parent_layout.addWidget(add_btn)
 
-    def copy_selected_text(self):
+    def copy_selected_text(self, button=None):
         holder = getattr(self.app, "current_text_holder", None)
         text = getattr(holder, "text", "") if holder else ""
         if text:
             QtWidgets.QApplication.clipboard().setText(text)
+            if button is not None:
+                button.setIconSize(QtCore.QSize(28, 28))
+                button.setToolTip(_("Copied"))
+                QtCore.QTimer.singleShot(180, lambda: button.setIconSize(QtCore.QSize(20, 20)))
+                QtCore.QTimer.singleShot(1200, lambda: button.setToolTip(_("Copy selected text")))
 
     def add_edit_delete_icons(self, btn):
         """Add edit/delete icons as overlays with proper spacing."""
