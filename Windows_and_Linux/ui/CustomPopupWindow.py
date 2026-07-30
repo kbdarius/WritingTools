@@ -10,8 +10,11 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QPlainTextEdit,
     QPushButton,
     QRadioButton,
@@ -90,6 +93,8 @@ DEFAULT_OPTIONS_JSON = r"""{
   }
 }"""
 
+PINNED_TEXTS_FILENAME = "pinned_texts.json"
+
 
 class PopupButtonVisibilityDialog(QDialog):
     """Choose which saved actions appear in the Ctrl+Space popup."""
@@ -164,6 +169,194 @@ class PopupButtonVisibilityDialog(QDialog):
         CustomPopupWindow.save_options(self.options)
         self.app.load_options()
         self.accept()
+
+
+class PinnedTextDialog(QDialog):
+    """Local pinned text library that stays independent from Windows Win+V."""
+
+    def __init__(self, popup, parent=None):
+        super().__init__(parent or popup)
+        self.popup = popup
+        self.setWindowTitle("Pinned Text Library")
+        self.setMinimumWidth(620)
+        self.setMinimumHeight(380)
+
+        self.entries = CustomPopupWindow.load_pinned_texts()
+
+        layout = QVBoxLayout(self)
+        intro = QLabel(
+            "Save reusable text snippets here. This library stays in Writing Tools "
+            "even if you remove the item from Windows clipboard history."
+        )
+        intro.setWordWrap(True)
+        intro.setStyleSheet(
+            f"color: {'#fff' if colorMode == 'dark' else '#333'}; font-size: 13px;"
+        )
+        layout.addWidget(intro)
+
+        body = QHBoxLayout()
+        self.list_widget = QListWidget()
+        self.list_widget.currentRowChanged.connect(self._update_preview)
+        self.list_widget.setMinimumWidth(240)
+        body.addWidget(self.list_widget, 1)
+
+        right_panel = QVBoxLayout()
+        self.preview = QPlainTextEdit()
+        self.preview.setReadOnly(True)
+        self.preview.setPlaceholderText("Select a pinned item to preview it here.")
+        self.preview.setStyleSheet(f"""
+            QPlainTextEdit {{
+                padding: 8px;
+                border: 1px solid {'#777' if colorMode == 'dark' else '#ccc'};
+                border-radius: 8px;
+                background-color: {'#333' if colorMode == 'dark' else 'white'};
+                color: {'#fff' if colorMode == 'dark' else '#000'};
+            }}
+        """)
+        right_panel.addWidget(self.preview, 1)
+
+        stats_row = QHBoxLayout()
+        self.status_label = QLabel("")
+        self.status_label.setStyleSheet(
+            f"color: {'#bbb' if colorMode == 'dark' else '#666'}; font-size: 12px;"
+        )
+        stats_row.addWidget(self.status_label, 1)
+        right_panel.addLayout(stats_row)
+        body.addLayout(right_panel, 2)
+        layout.addLayout(body)
+
+        action_row = QHBoxLayout()
+        action_row.setSpacing(8)
+
+        add_clipboard_button = QPushButton("Add Current Clipboard")
+        add_clipboard_button.clicked.connect(self._add_current_clipboard)
+        action_row.addWidget(add_clipboard_button)
+
+        add_manual_button = QPushButton("Add Manually")
+        add_manual_button.clicked.connect(self._add_manual)
+        action_row.addWidget(add_manual_button)
+
+        copy_button = QPushButton("Copy")
+        copy_button.clicked.connect(self._copy_selected)
+        action_row.addWidget(copy_button)
+
+        paste_button = QPushButton("Paste")
+        paste_button.clicked.connect(self._paste_selected)
+        action_row.addWidget(paste_button)
+
+        delete_button = QPushButton("Delete")
+        delete_button.clicked.connect(self._delete_selected)
+        action_row.addWidget(delete_button)
+
+        close_button = QPushButton("Close")
+        close_button.clicked.connect(self.accept)
+        action_row.addWidget(close_button)
+        layout.addLayout(action_row)
+
+        self._refresh_list()
+
+    def _refresh_list(self, select_index=0):
+        self.list_widget.blockSignals(True)
+        self.list_widget.clear()
+        for entry in self.entries:
+            text = (entry.get("text") or "").strip()
+            summary = " ".join(text.split())
+            if len(summary) > 60:
+                summary = summary[:60] + "..."
+            label = summary or "(blank)"
+            if entry.get("source") == "clipboard":
+                label = f"[Clipboard] {label}"
+            item = QListWidgetItem(label)
+            item.setData(Qt.ItemDataRole.UserRole, entry)
+            self.list_widget.addItem(item)
+        self.list_widget.blockSignals(False)
+
+        if self.entries:
+            self.list_widget.setCurrentRow(min(select_index, len(self.entries) - 1))
+        else:
+            self.preview.clear()
+            self.status_label.setText("No pinned text saved yet.")
+
+    def _selected_index(self):
+        return self.list_widget.currentRow()
+
+    def _selected_entry(self):
+        index = self._selected_index()
+        if index < 0 or index >= len(self.entries):
+            return None, None
+        return index, self.entries[index]
+
+    def _update_preview(self, row):
+        if row < 0 or row >= len(self.entries):
+            self.preview.clear()
+            self.status_label.setText("No pinned text selected.")
+            return
+        entry = self.entries[row]
+        text = entry.get("text", "")
+        self.preview.setPlainText(text)
+        source = entry.get("source", "manual").capitalize()
+        self.status_label.setText(f"{len(text):,} characters | Source: {source}")
+
+    def _save(self):
+        CustomPopupWindow.save_pinned_texts(self.entries)
+
+    def _store_text(self, text, source):
+        text = (text or "").strip()
+        if not text:
+            QtWidgets.QMessageBox.information(self, "Pinned Text Library", "Nothing to add.")
+            return
+
+        existing_index = next(
+            (i for i, entry in enumerate(self.entries) if (entry.get("text") or "").strip() == text),
+            None,
+        )
+        if existing_index is not None:
+            self.entries.pop(existing_index)
+
+        self.entries.insert(0, {
+            "text": text,
+            "source": source,
+            "created_at": QtCore.QDateTime.currentDateTimeUtc().toString(QtCore.Qt.DateFormat.ISODate),
+        })
+        self._save()
+        self._refresh_list(0)
+
+    def _add_current_clipboard(self):
+        text = QtWidgets.QApplication.clipboard().text()
+        self._store_text(text, "clipboard")
+
+    def _add_manual(self):
+        text, ok = QInputDialog.getMultiLineText(
+            self,
+            "Add Pinned Text",
+            "Paste or type the text you want to keep pinned:",
+        )
+        if ok:
+            self._store_text(text, "manual")
+
+    def _copy_selected(self):
+        _, entry = self._selected_entry()
+        if not entry:
+            return
+        QtWidgets.QApplication.clipboard().setText(entry.get("text", ""))
+
+    def _paste_selected(self):
+        _, entry = self._selected_entry()
+        if not entry:
+            return
+        text = entry.get("text", "")
+        if hasattr(self.popup.app, "_restore_target_and_paste"):
+            self.popup.app._restore_target_and_paste(text)
+        else:
+            QtWidgets.QApplication.clipboard().setText(text)
+
+    def _delete_selected(self):
+        index, entry = self._selected_entry()
+        if not entry:
+            return
+        del self.entries[index]
+        self._save()
+        self._refresh_list(min(index, len(self.entries) - 1))
 
 class ButtonEditDialog(QDialog):
     """
@@ -351,7 +544,7 @@ class DraggableButton(QtWidgets.QPushButton):
         self.setProperty("hover", False)
 
         # Set fixed size (adjust as needed)
-        self.setFixedSize(42, 40)
+        self.setFixedSize(36, 34)
 
         # Define base style using the dynamic property instead of the :hover pseudo-class
         self.base_style = f"""
@@ -359,8 +552,8 @@ class DraggableButton(QtWidgets.QPushButton):
                 background-color: {"#444" if colorMode=="dark" else "white"};
                 border: 1px solid {"#666" if colorMode=="dark" else "#ccc"};
                 border-radius: 8px;
-                padding: 10px;
-                font-size: 14px;
+                padding: 6px 8px;
+                font-size: 12px;
                 text-align: center;
                 color: {"#fff" if colorMode=="dark" else "#000"};
             }}
@@ -465,6 +658,7 @@ class CustomPopupWindow(QtWidgets.QWidget):
         self.edit_button = None
         self.reset_button = None
         self.close_button = None
+        self.list_button = None
         self.custom_input = None
         self.input_area = None
         self.has_custom_prompt = False
@@ -483,7 +677,6 @@ class CustomPopupWindow(QtWidgets.QWidget):
         self.setWindowTitle(APP_DISPLAY_NAME)
         self._drag_active = False
         self._drag_offset = QtCore.QPoint()
-        self.setMinimumWidth(300)
         
         main_layout = QtWidgets.QVBoxLayout(self)
         main_layout.setContentsMargins(0,0,0,0)
@@ -529,6 +722,30 @@ class CustomPopupWindow(QtWidgets.QWidget):
         """)
         self.edit_button.clicked.connect(self.toggle_edit_mode)
         top_bar.addWidget(self.edit_button, 0, Qt.AlignLeft)
+
+        self.list_button = QPushButton()
+        list_icon = os.path.join(
+            os.path.dirname(sys.argv[0]),
+            'icons',
+            'list' + ('_dark' if colorMode == 'dark' else '_light') + '.png'
+        )
+        if os.path.exists(list_icon):
+            self.list_button.setIcon(QtGui.QIcon(list_icon))
+        self.list_button.setFixedSize(22, 22)
+        self.list_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                border: none;
+                border-radius: 6px;
+                padding: 0px;
+            }}
+            QPushButton:hover {{
+                background-color: {'#333' if colorMode=='dark' else '#ebebeb'};
+            }}
+        """)
+        self.list_button.setToolTip(_("Pinned text library"))
+        self.list_button.clicked.connect(self.show_pinned_text_library)
+        top_bar.addWidget(self.list_button, 0, Qt.AlignLeft)
 
         # The label "Drag to rearrange" (BOLD as requested)
         self.drag_label = QLabel("Drag to rearrange")
@@ -645,6 +862,7 @@ class CustomPopupWindow(QtWidgets.QWidget):
 
         self.build_buttons_list()
         self.rebuild_grid_layout(content_layout)
+        self.adjustSize()
 
         # show update notice if applicable
         if self.app.config.get("update_available", False):
@@ -761,7 +979,7 @@ class CustomPopupWindow(QtWidgets.QWidget):
 
         # Add buttons in a single compact row.
         for b in self.button_widgets:
-            b.setFixedSize(34, 34)
+            b.setFixedSize(36, 34)
             row_layout.addWidget(b)
 
         if not self.edit_mode:
@@ -801,6 +1019,8 @@ class CustomPopupWindow(QtWidgets.QWidget):
             """)
             self.add_button.clicked.connect(self.add_new_button_clicked)
             parent_layout.addWidget(self.add_button, alignment=Qt.AlignLeft)
+
+        self.adjustSize()
 
     def copy_selected_text(self, button=None):
         holder = getattr(self.app, "current_text_holder", None)
@@ -948,6 +1168,40 @@ class CustomPopupWindow(QtWidgets.QWidget):
 
         # Rebuild grid layout
         self.rebuild_grid_layout()
+        self.adjustSize()
+
+    def show_pinned_text_library(self):
+        dialog = PinnedTextDialog(self, self)
+        dialog.exec()
+
+    @staticmethod
+    def pinned_texts_path():
+        base_dir = os.path.join(
+            os.environ.get('LOCALAPPDATA', os.path.dirname(sys.argv[0])),
+            'Writing Tools',
+        )
+        os.makedirs(base_dir, exist_ok=True)
+        return os.path.join(base_dir, PINNED_TEXTS_FILENAME)
+
+    @staticmethod
+    def load_pinned_texts():
+        path = CustomPopupWindow.pinned_texts_path()
+        if not os.path.exists(path):
+            return []
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            if isinstance(data, list):
+                return [entry for entry in data if isinstance(entry, dict) and entry.get("text")]
+        except Exception:
+            logging.exception("Failed to load pinned text library")
+        return []
+
+    @staticmethod
+    def save_pinned_texts(entries):
+        path = CustomPopupWindow.pinned_texts_path()
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(entries, f, indent=2, ensure_ascii=False)
 
 
     def on_reset_clicked(self):
