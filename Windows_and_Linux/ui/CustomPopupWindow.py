@@ -468,6 +468,8 @@ class CustomPopupWindow(QtWidgets.QWidget):
         self.custom_input = None
         self.input_area = None
         self.has_custom_prompt = False
+        self.buttons_host = None
+        self.add_button = None
         
         self.button_widgets = []
 
@@ -481,6 +483,7 @@ class CustomPopupWindow(QtWidgets.QWidget):
         self.setWindowTitle(APP_DISPLAY_NAME)
         self._drag_active = False
         self._drag_offset = QtCore.QPoint()
+        self.setMinimumWidth(300)
         
         main_layout = QtWidgets.QVBoxLayout(self)
         main_layout.setContentsMargins(0,0,0,0)
@@ -495,13 +498,13 @@ class CustomPopupWindow(QtWidgets.QWidget):
         
         content_layout = QtWidgets.QVBoxLayout(self.background)
         # Margin Control
-        content_layout.setContentsMargins(10, 4, 10, 10)
-        content_layout.setSpacing(10)
+        content_layout.setContentsMargins(8, 4, 8, 8)
+        content_layout.setSpacing(6)
         
         # TOP BAR LAYOUT & STYLE
         top_bar = QHBoxLayout()
         top_bar.setContentsMargins(0, 0, 0, 0)
-        top_bar.setSpacing(0)
+        top_bar.setSpacing(4)
 
         # The "Edit"/"Done" button (left), same exact size as close button
         self.edit_button = QPushButton()
@@ -510,15 +513,15 @@ class CustomPopupWindow(QtWidgets.QWidget):
                                 'pencil' + ('_dark' if colorMode=='dark' else '_light') + '.png')
         if os.path.exists(pencil_icon):
             self.edit_button.setIcon(QtGui.QIcon(pencil_icon))
-        # Reduced size to 24x24 to shrink top bar
-        self.edit_button.setFixedSize(24, 24)
+        # Reduced size to keep the popup compact.
+        self.edit_button.setFixedSize(22, 22)
         self.edit_button.setStyleSheet(f"""
             QPushButton {{
                 background-color: transparent;
                 border: none;
                 border-radius: 6px;
                 padding: 0px;
-                margin-top: 3px;
+                margin-top: 1px;
             }}
             QPushButton:hover {{
                 background-color: {'#333' if colorMode=='dark' else '#ebebeb'};
@@ -531,7 +534,7 @@ class CustomPopupWindow(QtWidgets.QWidget):
         self.drag_label = QLabel("Drag to rearrange")
         self.drag_label.setStyleSheet(f"""
             color: {'#fff' if colorMode=='dark' else '#333'};
-            font-size: 14px;
+            font-size: 11px;
             font-weight: bold; /* <--- BOLD TEXT */
         """)
         self.drag_label.setAlignment(Qt.AlignCenter)
@@ -541,10 +544,10 @@ class CustomPopupWindow(QtWidgets.QWidget):
         version_label = QLabel(f"v{APP_VERSION}")
         version_label.setStyleSheet(f"""
             color: {'#aaa' if colorMode=='dark' else '#666'};
-            font-size: 11px;
+            font-size: 9px;
             font-weight: bold;
-            padding-top: 2px;
-            padding-right: 6px;
+            padding-top: 1px;
+            padding-right: 4px;
         """)
         version_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         top_bar.addWidget(version_label, 0, Qt.AlignVCenter | Qt.AlignRight)
@@ -556,7 +559,7 @@ class CustomPopupWindow(QtWidgets.QWidget):
         if os.path.exists(reset_icon_path):
             self.reset_button.setIcon(QtGui.QIcon(reset_icon_path))
         self.reset_button.setText("")
-        self.reset_button.setFixedSize(24, 24)
+        self.reset_button.setFixedSize(22, 22)
         self.reset_button.setStyleSheet(f"""
             QPushButton {{
                 background-color: transparent;
@@ -574,12 +577,12 @@ class CustomPopupWindow(QtWidgets.QWidget):
 
         # Close button block:
         self.close_button = QPushButton("×")
-        self.close_button.setFixedSize(24, 24)
+        self.close_button.setFixedSize(22, 22)
         self.close_button.setStyleSheet(f"""
             QPushButton {{
                 background-color: transparent;
                 color: {'#fff' if colorMode=='dark' else '#333'};
-                font-size: 20px;   /* bigger text */
+                font-size: 18px;
                 font-weight: bold; /* bold text */
                 border: none;
                 border-radius: 6px;
@@ -596,21 +599,23 @@ class CustomPopupWindow(QtWidgets.QWidget):
         
         # Input area (hidden in edit mode)
         self.input_area = QWidget()
-        self.has_custom_prompt = "Custom" in self.load_options()
+        self.has_custom_prompt = bool(self.app.config.get("show_custom_prompt_box", False)) and "Custom" in self.load_options()
         input_layout = QHBoxLayout(self.input_area)
         input_layout.setContentsMargins(0,0,0,0)
+        input_layout.setSpacing(6)
         
         self.custom_input = QLineEdit()
         self.custom_input.setPlaceholderText(_("Describe your change..."))
         self.custom_input.setStyleSheet(f"""
             QLineEdit {{
-                padding: 8px;
+                padding: 6px 8px;
                 border: 1px solid {'#777' if colorMode=='dark' else '#ccc'};
                 border-radius: 8px;
                 background-color: {'#333' if colorMode=='dark' else 'white'};
                 color: {'#fff' if colorMode=='dark' else '#000'};
             }}
         """)
+        self.custom_input.setFixedHeight(30)
         self.custom_input.returnPressed.connect(self.on_custom_change)
         input_layout.addWidget(self.custom_input)
         
@@ -625,14 +630,13 @@ class CustomPopupWindow(QtWidgets.QWidget):
                 background-color: {'#2e7d32' if colorMode=='dark' else '#4CAF50'};
                 border: none;
                 border-radius: 8px;
-                padding: 5px;
+                padding: 4px;
             }}
             QPushButton:hover {{
                 background-color: {'#1b5e20' if colorMode=='dark' else '#45a049'};
             }}
         """)
-        send_btn.setFixedSize(self.custom_input.sizeHint().height(),
-                            self.custom_input.sizeHint().height())
+        send_btn.setFixedSize(30, 30)
         send_btn.clicked.connect(self.on_custom_change)
         input_layout.addWidget(send_btn)
         
@@ -648,6 +652,7 @@ class CustomPopupWindow(QtWidgets.QWidget):
             update_label.setOpenExternalLinks(True)
             update_label.setText('<a href="https://github.com/theJayTea/WritingTools/releases" style="color:rgb(255, 0, 0); text-decoration: underline; font-weight: bold;">There\'s an update! :D Download now.</a>')
             update_label.setStyleSheet("margin-top: 10px;")
+            update_label.setWordWrap(True)
             content_layout.addWidget(update_label, alignment=QtCore.Qt.AlignCenter)
         
         logging.debug('CustomPopupWindow UI setup complete')
@@ -709,7 +714,7 @@ class CustomPopupWindow(QtWidgets.QWidget):
                 continue
             b = DraggableButton(self, k, k)
             b.setText("")
-            b.setIconSize(QtCore.QSize(24, 24))
+            b.setIconSize(QtCore.QSize(18, 18))
             b.setToolTip(k)
             if v.get("icon") == "builtin:speaker":
                 b.setIcon(self.style().standardIcon(
@@ -734,39 +739,30 @@ class CustomPopupWindow(QtWidgets.QWidget):
             self.button_widgets.append(b)
 
     def rebuild_grid_layout(self, parent_layout=None):
-        """Rebuild grid layout with consistent sizing and proper Add New button placement."""
+        """Rebuild the compact horizontal button row and edit controls."""
         if not parent_layout:
             parent_layout = self.background.layout()
 
-        # Remove existing grid and Add New button
-        for i in reversed(range(parent_layout.count())):
-            item = parent_layout.itemAt(i)
-            if isinstance(item, QtWidgets.QGridLayout):
-                grid = item
-                for j in reversed(range(grid.count())):
-                    w = grid.itemAt(j).widget()
-                    if w:
-                        grid.removeWidget(w)
-                parent_layout.removeItem(grid)
-            elif (item.widget() and isinstance(item.widget(), QPushButton) 
-                and item.widget().text() == "+ Add New"):
-                item.widget().deleteLater()
+        if self.buttons_host is not None:
+            parent_layout.removeWidget(self.buttons_host)
+            self.buttons_host.deleteLater()
+            self.buttons_host = None
 
-        # Create new grid with fixed column width
-        grid = QtWidgets.QGridLayout()
-        grid.setSpacing(6)
-        grid.setColumnMinimumWidth(0, 42)
-        grid.setColumnMinimumWidth(1, 42)
-        
-        # Add buttons to grid
-        row = 0
-        col = 0
+        if self.add_button is not None:
+            parent_layout.removeWidget(self.add_button)
+            self.add_button.deleteLater()
+            self.add_button = None
+
+        self.buttons_host = QWidget()
+        self.buttons_host.setStyleSheet("background: transparent;")
+        row_layout = QHBoxLayout(self.buttons_host)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(4)
+
+        # Add buttons in a single compact row.
         for b in self.button_widgets:
-            grid.addWidget(b, row, col)
-            col += 1
-            if col > 1:
-                col = 0
-                row += 1
+            b.setFixedSize(34, 34)
+            row_layout.addWidget(b)
 
         if not self.edit_mode:
             copy_button = QtWidgets.QToolButton()
@@ -777,34 +773,34 @@ class CustomPopupWindow(QtWidgets.QWidget):
             )
             if os.path.exists(copy_icon):
                 copy_button.setIcon(QtGui.QIcon(copy_icon))
-            copy_button.setIconSize(QtCore.QSize(20, 20))
+            copy_button.setIconSize(QtCore.QSize(18, 18))
             copy_button.setToolTip(_("Copy selected text"))
-            copy_button.setFixedSize(34, 34)
+            copy_button.setFixedSize(30, 30)
             copy_button.clicked.connect(lambda: self.copy_selected_text(copy_button))
-            grid.addWidget(copy_button, row, col)
-        
-        parent_layout.addLayout(grid)
+            row_layout.addWidget(copy_button)
+
+        parent_layout.addWidget(self.buttons_host, alignment=Qt.AlignLeft)
         
         # Add New button (only in edit mode)
         if self.edit_mode:
-            add_btn = QPushButton("+ Add New")
-            add_btn.setStyleSheet(f"""
+            self.add_button = QPushButton("+ Add New")
+            self.add_button.setStyleSheet(f"""
                 QPushButton {{
                     background-color: {'#333' if colorMode=='dark' else '#e0e0e0'};
                     border: 1px solid {'#666' if colorMode=='dark' else '#ccc'};
                     border-radius: 8px;
-                    padding: 10px;
+                    padding: 8px;
                     font-size: 14px;
                     text-align: center;
                     color: {'#fff' if colorMode=='dark' else '#000'};
-                    margin-top: 10px;
+                    margin-top: 6px;
                 }}
                 QPushButton:hover {{
                     background-color: {'#444' if colorMode=='dark' else '#d0d0d0'};
                 }}
             """)
-            add_btn.clicked.connect(self.add_new_button_clicked)
-            parent_layout.addWidget(add_btn)
+            self.add_button.clicked.connect(self.add_new_button_clicked)
+            parent_layout.addWidget(self.add_button, alignment=Qt.AlignLeft)
 
     def copy_selected_text(self, button=None):
         holder = getattr(self.app, "current_text_holder", None)
@@ -906,7 +902,7 @@ class CustomPopupWindow(QtWidgets.QWidget):
             # Switch back to normal (non-edit) mode:
             icon_name = "pencil"
             self.edit_button.setText("")
-            self.edit_button.setFixedSize(24, 24)  # Return to normal size
+            self.edit_button.setFixedSize(22, 22)  # Return to normal size
             # Show close, hide reset & drag label
             self.close_button.show()
             self.reset_button.hide()

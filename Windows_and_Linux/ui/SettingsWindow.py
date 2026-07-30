@@ -46,6 +46,7 @@ class SettingsWindow(QtWidgets.QWidget):
         self.provider_container = None
         self.autostart_checkbox = None
         self.shortcut_input = None
+        self.custom_prompt_checkbox = None
         self.review_before_insert_checkbox = None
         self.read_aloud_provider_dropdown = None
         self.azure_speech_key_input = None
@@ -360,6 +361,20 @@ class SettingsWindow(QtWidgets.QWidget):
                 f"font-size: 16px; color: {'#ffffff' if colorMode == 'dark' else '#333333'};"
             )
             content_layout.addWidget(self.review_before_insert_checkbox)
+
+            self.custom_prompt_checkbox = QtWidgets.QCheckBox(
+                _("Show custom prompt box in popup")
+            )
+            self.custom_prompt_checkbox.setToolTip(
+                _("Most people only use the monitor buttons. Turn this on if you want a small text box for extra instructions.")
+            )
+            self.custom_prompt_checkbox.setChecked(
+                self.app.config.get('show_custom_prompt_box', False)
+            )
+            self.custom_prompt_checkbox.setStyleSheet(
+                f"font-size: 16px; color: {'#ffffff' if colorMode == 'dark' else '#333333'};"
+            )
+            content_layout.addWidget(self.custom_prompt_checkbox)
 
             # Prompt management lives on its own tab.
             content_layout = prompts_layout
@@ -1101,6 +1116,8 @@ class SettingsWindow(QtWidgets.QWidget):
             self.app.config['fast_track_action'] = self.fast_track_dropdown.currentData()
             self.app.config['theme'] = 'gradient' if self.gradient_radio.isChecked() else 'plain'
             self.app.config['review_before_insert'] = self.review_before_insert_checkbox.isChecked()
+            if self.custom_prompt_checkbox is not None:
+                self.app.config['show_custom_prompt_box'] = self.custom_prompt_checkbox.isChecked()
             self.app.config['read_aloud_provider'] = self.read_aloud_provider_dropdown.currentData()
             self.app.set_read_aloud_rate(self.read_aloud_speed_dropdown.currentData())
             self.app.config['azure_speech'] = {
