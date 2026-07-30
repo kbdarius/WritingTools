@@ -271,11 +271,7 @@ class PinnedTextDialog(QDialog):
         action_row = QHBoxLayout()
         action_row.setSpacing(8)
 
-        add_clipboard_button = QPushButton("Add Current Clipboard")
-        add_clipboard_button.clicked.connect(self._add_current_clipboard)
-        action_row.addWidget(add_clipboard_button)
-
-        add_manual_button = QPushButton("Add Manually")
+        add_manual_button = QPushButton("Add")
         add_manual_button.clicked.connect(self._add_manual)
         action_row.addWidget(add_manual_button)
 
@@ -851,6 +847,7 @@ class CustomPopupWindow(QtWidgets.QWidget):
         """)
         self.close_button.clicked.connect(self.close)
         top_bar.addWidget(self.close_button, 0, Qt.AlignRight)
+        self.toolbar_layout = top_bar
         content_layout.addLayout(top_bar)
 
         
@@ -901,7 +898,7 @@ class CustomPopupWindow(QtWidgets.QWidget):
         self.input_area.setVisible(self.has_custom_prompt)
 
         self.build_buttons_list()
-        self.rebuild_grid_layout(content_layout)
+        self.rebuild_grid_layout(self.toolbar_layout)
         self.adjustSize()
 
         # show update notice if applicable
@@ -1207,7 +1204,7 @@ class CustomPopupWindow(QtWidgets.QWidget):
             btn.setStyleSheet(btn.base_style)
 
         # Rebuild grid layout
-        self.rebuild_grid_layout()
+        self.rebuild_grid_layout(self.toolbar_layout)
         self.adjustSize()
 
     def show_pinned_text_library(self):
@@ -1222,11 +1219,14 @@ class CustomPopupWindow(QtWidgets.QWidget):
         menu = QtWidgets.QMenu(self)
         edit_actions = menu.addAction(_("Edit popup buttons"))
         manage_pinned = menu.addAction(_("Manage pinned text"))
+        open_settings = menu.addAction(_("Open main settings"))
         chosen = menu.exec(self.edit_button.mapToGlobal(self.edit_button.rect().bottomLeft()))
         if chosen is edit_actions:
             self.toggle_edit_mode()
         elif chosen is manage_pinned:
             self.show_pinned_text_library()
+        elif chosen is open_settings:
+            self.app.show_settings()
 
     def show_pinned_text_picker(self):
         menu = QtWidgets.QMenu(self)
@@ -1242,7 +1242,9 @@ class CustomPopupWindow(QtWidgets.QWidget):
                     label = label[:60] + "..."
                 action = menu.addAction(label)
                 action.setToolTip(text)
-                action.triggered.connect(partial(self.paste_pinned_text, entry.get("text", "")))
+                action.triggered.connect(
+                    lambda checked=False, text=entry.get("text", ""): self.paste_pinned_text(text)
+                )
             menu.addSeparator()
             manage_action = menu.addAction(_("Manage pinned text..."))
             manage_action.triggered.connect(self.show_pinned_text_library)
