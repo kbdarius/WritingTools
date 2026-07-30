@@ -377,6 +377,16 @@ class ResponseWindow(QtWidgets.QWidget):
             btn.clicked.connect(action)
             btn.setFixedSize(30, 30)
             top_bar.addWidget(btn)
+
+        settings_btn = QtWidgets.QPushButton()
+        settings_btn.setIcon(
+            self.style().standardIcon(QtWidgets.QStyle.StandardPixmap.SP_FileDialogDetailedView)
+        )
+        settings_btn.setStyleSheet(self.get_button_style())
+        settings_btn.setToolTip(_("Open main settings"))
+        settings_btn.clicked.connect(self.app.show_settings)
+        settings_btn.setFixedSize(30, 30)
+        top_bar.addWidget(settings_btn)
             
         content_layout.addLayout(top_bar)
 
