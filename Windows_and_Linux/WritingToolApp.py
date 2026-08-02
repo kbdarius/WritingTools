@@ -18,7 +18,7 @@ import ui.OnboardingWindow
 import ui.ResponseWindow
 import ui.SettingsWindow
 import ui.SpeechControlWindow
-from aiprovider import GeminiProvider, OllamaProvider, OpenAICompatibleProvider, obfuscate_api_key
+from aiprovider import AzureOpenAIProvider, GeminiProvider, OllamaProvider, OpenAICompatibleProvider, obfuscate_api_key
 from azure_speech import AzureSpeechService
 from local_speech import LocalSpeechService
 from pynput import keyboard as pykeyboard
@@ -165,6 +165,7 @@ class WritingToolApp(QtWidgets.QApplication):
         # Setup available AI providers
         self.providers = [
             GeminiProvider(self),
+            AzureOpenAIProvider(self),
             OpenAICompatibleProvider(self),
         ]
 

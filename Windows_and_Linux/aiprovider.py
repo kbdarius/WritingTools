@@ -575,6 +575,22 @@ class OpenAICompatibleProvider(AIProvider):
             "• You must abide by the service's Terms of Service.",
             "openai", "Get OpenAI API Key", lambda: webbrowser.open("https://platform.openai.com/account/api-keys"))
 
+    def load_config(self, config: dict):
+        if "api_key" in config:
+            config = config.copy()
+            config["api_key"] = deobfuscate_api_key(config["api_key"])
+        AIProvider.load_config(self, config)
+
+    def save_config(self):
+        config = {}
+        for setting in self.settings:
+            value = setting.get_value()
+            if setting.name == "api_key":
+                value = obfuscate_api_key(value)
+            config[setting.name] = value
+        self.app.config["providers"][self.provider_name] = config
+        self.app.save_config(self.app.config)
+
     def get_response(self, system_instruction: str, prompt: str | list, return_response: bool = False) -> str:
         """
         Send a chat request to the OpenAI-compatible API.
@@ -656,6 +672,62 @@ class OpenAICompatibleProvider(AIProvider):
             return True, f"Connected to {model}."
         except Exception as exc:
             return False, f"Connection failed: {exc}"
+
+
+class AzureOpenAIProvider(OpenAICompatibleProvider):
+    """Simplified Azure OpenAI setup for managed or restricted PCs."""
+
+    def __init__(self, app):
+        self.close_requested = None
+        self.client = None
+        settings = [
+            SecretSetting(
+                name="api_key",
+                display_name="Azure API Key",
+                description="API key from Microsoft Foundry",
+            ),
+            TextSetting(
+                "api_base",
+                "Azure OpenAI Endpoint",
+                "",
+                "https://<resource>.openai.azure.com/openai/v1/",
+            ),
+            DropdownSetting(
+                name="api_model",
+                display_name="Deployment",
+                default_value="gpt-5.6-luna-1",
+                description="Select an Azure deployment",
+                options=[
+                    ("GPT-5.6 Luna (recommended)", "gpt-5.6-luna-1"),
+                    ("GPT-5 Nano (fast)", "gpt-5-nano"),
+                ],
+                allow_custom=True,
+                custom_placeholder="Enter the Azure deployment name",
+            ),
+        ]
+        AIProvider.__init__(
+            self,
+            app,
+            "Azure OpenAI (Restricted PCs)",
+            settings,
+            "• For work or restricted PCs that access AI through Microsoft Azure.\n"
+            "• Enter the Azure key and endpoint supplied by your administrator.",
+            "openai",
+            "Open Microsoft Foundry",
+            lambda: webbrowser.open("https://ai.azure.com/"),
+        )
+
+    def after_load(self):
+        self.client = OpenAI(
+            api_key=self.api_key,
+            base_url=self.api_base,
+        )
+
+    def validate_connection(self, config: dict):
+        success, message = super().validate_connection(config)
+        if not success and message == "Enter an API key, API base URL, and model.":
+            return False, "Enter an Azure API key, Azure OpenAI endpoint, and deployment."
+        return success, message
 
 
 class GitHubModelsProvider(OpenAICompatibleProvider):
