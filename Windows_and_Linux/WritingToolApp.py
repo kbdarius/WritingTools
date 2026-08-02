@@ -18,7 +18,7 @@ import ui.OnboardingWindow
 import ui.ResponseWindow
 import ui.SettingsWindow
 import ui.SpeechControlWindow
-from aiprovider import GitHubModelsProvider, GeminiProvider, OllamaProvider, OpenAICompatibleProvider, obfuscate_api_key
+from aiprovider import GeminiProvider, OllamaProvider, OpenAICompatibleProvider, obfuscate_api_key
 from azure_speech import AzureSpeechService
 from local_speech import LocalSpeechService
 from pynput import keyboard as pykeyboard
@@ -165,9 +165,7 @@ class WritingToolApp(QtWidgets.QApplication):
         # Setup available AI providers
         self.providers = [
             GeminiProvider(self),
-            GitHubModelsProvider(self),
             OpenAICompatibleProvider(self),
-            OllamaProvider(self),
         ]
 
         if not self.config:
@@ -184,7 +182,9 @@ class WritingToolApp(QtWidgets.QApplication):
                 logging.warning(f'Provider {provider_name} not found. Using default provider.')
                 self.current_provider = self.providers[0]
 
-            self.current_provider.load_config(self.config.get("providers", {}).get(provider_name, {}))
+            self.current_provider.load_config(
+                self.config.get("providers", {}).get(self.current_provider.provider_name, {})
+            )
 
             self.create_tray_icon()
             self.register_hotkey()

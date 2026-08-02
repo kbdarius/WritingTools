@@ -724,7 +724,8 @@ class SettingsWindow(QtWidgets.QWidget):
         current_provider = self.app.config.get('provider', self.app.providers[0].provider_name)
         for provider in self.app.providers:
             self.provider_dropdown.addItem(provider.provider_name)
-        self.provider_dropdown.setCurrentIndex(self.provider_dropdown.findText(current_provider))
+        current_provider_index = self.provider_dropdown.findText(current_provider)
+        self.provider_dropdown.setCurrentIndex(max(0, current_provider_index))
         content_layout.addWidget(self.provider_dropdown)
 
         # Create container for provider UI
