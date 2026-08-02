@@ -65,6 +65,8 @@ class SettingsWindow(QtWidgets.QWidget):
         self._validation_in_progress = False
         self._pending_provider = None
         self._pending_provider_config = None
+        self._provider_drafts = {}
+        self._active_provider_index = None
         self._azure_install_in_progress = False
         self.init_ui()
         self.validation_finished.connect(self._finish_provider_validation)
@@ -182,9 +184,14 @@ class SettingsWindow(QtWidgets.QWidget):
         if provider.provider_name not in self.app.config["providers"]:
             self.app.config["providers"][provider.provider_name] = {}
 
+        provider_config = self._provider_drafts.get(
+            provider.provider_name,
+            self.app.config["providers"][provider.provider_name],
+        )
+
         # Add provider settings
         for setting in provider.settings:
-            setting.set_value(self.app.config["providers"][provider.provider_name].get(setting.name, setting.default_value))
+            setting.set_value(provider_config.get(setting.name, setting.default_value))
             setting.render_to_layout(self.current_provider_layout)
 
         layout.addLayout(self.current_provider_layout)
@@ -590,6 +597,15 @@ class SettingsWindow(QtWidgets.QWidget):
         self.azure_speech_key_input.setPlaceholderText(_("Paste the key from your Azure Speech resource"))
         content_layout.addWidget(self.azure_speech_key_input)
 
+        azure_key_note = QtWidgets.QLabel(
+            _("This Speech key is separate from the Foundry / Azure OpenAI key used by Writing AI.")
+        )
+        azure_key_note.setWordWrap(True)
+        azure_key_note.setStyleSheet(
+            f"font-size: 13px; color: {'#cccccc' if colorMode == 'dark' else '#555555'};"
+        )
+        content_layout.addWidget(azure_key_note)
+
         azure_region_label = QtWidgets.QLabel(_("Azure Speech region:"))
         azure_region_label.setStyleSheet(
             f"font-size: 16px; color: {'#ffffff' if colorMode == 'dark' else '#333333'};"
@@ -707,7 +723,7 @@ class SettingsWindow(QtWidgets.QWidget):
         content_layout.addWidget(writing_intro)
 
         # Add provider selection
-        provider_label = QtWidgets.QLabel(_("Choose AI Provider:"))
+        provider_label = QtWidgets.QLabel(_("Writing AI provider:"))
         provider_label.setStyleSheet(f"font-size: 16px; color: {'#ffffff' if colorMode == 'dark' else '#333333'};")
         content_layout.addWidget(provider_label)
 
@@ -720,6 +736,12 @@ class SettingsWindow(QtWidgets.QWidget):
             border: 1px solid {'#666' if colorMode == 'dark' else '#ccc'};
         """)
         self.provider_dropdown.setInsertPolicy(QtWidgets.QComboBox.InsertPolicy.NoInsert)
+        self.provider_dropdown.setToolTip(
+            _(
+                "Gemini is the simplest option for regular PCs. Azure OpenAI is for work or "
+                "restricted PCs. OpenAI Compatible is for advanced custom services."
+            )
+        )
 
         current_provider = self.app.config.get('provider', self.app.providers[0].provider_name)
         for provider in self.app.providers:
@@ -736,6 +758,7 @@ class SettingsWindow(QtWidgets.QWidget):
         # Initialize provider UI
         provider_instance = self.app.providers[self.provider_dropdown.currentIndex()]
         self.init_provider_ui(provider_instance, self.provider_container)
+        self._active_provider_index = self.provider_dropdown.currentIndex()
         self._initial_provider_state = (
             self.provider_dropdown.currentText(),
             provider_instance.get_pending_config().copy(),
@@ -815,8 +838,15 @@ class SettingsWindow(QtWidgets.QWidget):
         editors["deleted"] = True
         editors["section"].hide()
 
-    def _provider_selection_changed(self):
-        provider = self.app.providers[self.provider_dropdown.currentIndex()]
+    def _provider_selection_changed(self, index):
+        if self._active_provider_index is not None:
+            previous_provider = self.app.providers[self._active_provider_index]
+            self._provider_drafts[previous_provider.provider_name] = (
+                previous_provider.get_pending_config().copy()
+            )
+
+        self._active_provider_index = index
+        provider = self.app.providers[index]
         self.init_provider_ui(provider, self.provider_container)
         if self.validation_label:
             self.validation_label.hide()

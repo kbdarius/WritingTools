@@ -380,7 +380,11 @@ class GeminiProvider(AIProvider):
         self.client = None
 
         settings = [
-            SecretSetting(name="api_key", display_name="API Key", description="Paste your Gemini API key here"),
+            SecretSetting(
+                name="api_key",
+                display_name="Gemini API Key",
+                description="Paste the key from Google AI Studio",
+            ),
             DropdownSetting(
                 name="model_name",
                 display_name="Model",
@@ -683,14 +687,14 @@ class AzureOpenAIProvider(OpenAICompatibleProvider):
         settings = [
             SecretSetting(
                 name="api_key",
-                display_name="Azure API Key",
-                description="API key from Microsoft Foundry",
+                display_name="Foundry / Azure OpenAI Key",
+                description="Paste the key from the Foundry resource (not Azure Speech)",
             ),
             TextSetting(
                 "api_base",
                 "Azure OpenAI Endpoint",
                 "",
-                "https://<resource>.openai.azure.com/openai/v1/",
+                "Paste the endpoint ending in /openai/v1/",
             ),
             DropdownSetting(
                 name="api_model",
@@ -711,7 +715,8 @@ class AzureOpenAIProvider(OpenAICompatibleProvider):
             "Azure OpenAI (Restricted PCs)",
             settings,
             "• For work or restricted PCs that access AI through Microsoft Azure.\n"
-            "• Enter the Azure key and endpoint supplied by your administrator.",
+            "• Enter the Foundry key, endpoint, and deployment supplied by your administrator.\n"
+            "• This is not the Azure Speech key used for Read Aloud.",
             "openai",
             "Open Microsoft Foundry",
             lambda: webbrowser.open("https://ai.azure.com/"),
