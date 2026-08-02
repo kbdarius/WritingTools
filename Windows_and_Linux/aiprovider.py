@@ -598,7 +598,6 @@ class OpenAICompatibleProvider(AIProvider):
             response = self.client.chat.completions.create(
                 model=self.api_model,
                 messages=messages,
-                temperature=0.5,
                 stream=False
             )
             response_text = response.choices[0].message.content.strip()
@@ -650,7 +649,6 @@ class OpenAICompatibleProvider(AIProvider):
             response = client.chat.completions.create(
                 model=model,
                 messages=[{"role": "user", "content": "Reply with OK."}],
-                max_tokens=8,
                 stream=False,
             )
             if not (response.choices[0].message.content or "").strip():
