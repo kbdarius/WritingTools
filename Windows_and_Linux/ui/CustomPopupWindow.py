@@ -283,6 +283,16 @@ class PinnedTextDialog(QDialog):
         delete_button.clicked.connect(self._delete_selected)
         action_row.addWidget(delete_button)
 
+        export_button = QPushButton("Export")
+        export_button.setToolTip("Export this pinned text library to another PC")
+        export_button.clicked.connect(self._export_entries)
+        action_row.addWidget(export_button)
+
+        import_button = QPushButton("Import")
+        import_button.setToolTip("Import pinned text entries from another PC")
+        import_button.clicked.connect(self._import_entries)
+        action_row.addWidget(import_button)
+
         close_button = QPushButton("Close")
         close_button.clicked.connect(self.accept)
         action_row.addWidget(close_button)
@@ -392,6 +402,52 @@ class PinnedTextDialog(QDialog):
         del self.entries[index]
         self._save()
         self._refresh_list(min(index, len(self.entries) - 1))
+
+    def _export_entries(self):
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Export pinned text", "pinned-texts.json", "JSON files (*.json)"
+        )
+        if not path:
+            return
+        try:
+            with open(path, "w", encoding="utf-8") as handle:
+                json.dump(self.entries, handle, indent=2, ensure_ascii=False)
+            QtWidgets.QMessageBox.information(self, "Pinned Text Library", "Pinned text exported successfully.")
+        except OSError as exc:
+            QtWidgets.QMessageBox.warning(self, "Export failed", str(exc))
+
+    def _import_entries(self):
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Import pinned text", "", "JSON files (*.json)"
+        )
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                imported = json.load(handle)
+            if not isinstance(imported, list) or not all(isinstance(entry, dict) for entry in imported):
+                raise ValueError("This file is not a valid pinned text export.")
+            clean_entries = [
+                entry for entry in imported
+                if isinstance(entry.get("text"), str) and entry.get("text").strip()
+            ]
+            if not clean_entries:
+                raise ValueError("The file does not contain any pinned text entries.")
+            confirm = QtWidgets.QMessageBox.question(
+                self,
+                "Replace pinned text?",
+                "Importing will replace the current pinned text list. Continue?",
+                QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
+                QtWidgets.QMessageBox.StandardButton.No,
+            )
+            if confirm != QtWidgets.QMessageBox.StandardButton.Yes:
+                return
+            self.entries = clean_entries
+            self._save()
+            self._refresh_list(0)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            QtWidgets.QMessageBox.warning(self, "Import failed", str(exc))
+
 
 class ButtonEditDialog(QDialog):
     """
@@ -792,7 +848,8 @@ class CustomPopupWindow(QtWidgets.QWidget):
         """)
         self.drag_label.setAlignment(Qt.AlignCenter)
         self.drag_label.hide()
-        top_bar.addWidget(self.drag_label, 1, Qt.AlignVCenter | Qt.AlignHCenter)
+        # Do not let the hidden drag label consume toolbar space in normal mode.
+        top_bar.addWidget(self.drag_label, 0, Qt.AlignVCenter | Qt.AlignHCenter)
 
         version_label = QLabel(f"v{APP_VERSION}")
         version_label.setStyleSheet(f"""
