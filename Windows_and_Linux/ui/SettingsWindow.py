@@ -1,4 +1,5 @@
 import os
+import json
 import sys
 import threading
 import webbrowser
@@ -368,6 +369,30 @@ class SettingsWindow(QtWidgets.QWidget):
                 f"font-size: 16px; color: {'#ffffff' if colorMode == 'dark' else '#333333'};"
             )
             content_layout.addWidget(self.review_before_insert_checkbox)
+
+            transfer_label = QtWidgets.QLabel(_("Move settings to another PC"))
+            transfer_label.setStyleSheet(
+                f"font-size: 17px; font-weight: bold; margin-top: 12px; "
+                f"color: {'#ffffff' if colorMode == 'dark' else '#333333'};"
+            )
+            content_layout.addWidget(transfer_label)
+            transfer_help = QtWidgets.QLabel(
+                _("Export your settings and prompt buttons to one JSON file, then import it on the other PC. "
+                  "The file can contain API keys, so keep it private.")
+            )
+            transfer_help.setWordWrap(True)
+            transfer_help.setStyleSheet(
+                f"font-size: 13px; color: {'#cccccc' if colorMode == 'dark' else '#667085'};"
+            )
+            content_layout.addWidget(transfer_help)
+            transfer_buttons = QHBoxLayout()
+            export_button = QtWidgets.QPushButton(_("Export settings"))
+            import_button = QtWidgets.QPushButton(_("Import settings"))
+            export_button.clicked.connect(self.export_settings)
+            import_button.clicked.connect(self.import_settings)
+            transfer_buttons.addWidget(export_button)
+            transfer_buttons.addWidget(import_button)
+            content_layout.addLayout(transfer_buttons)
 
             self.custom_prompt_checkbox = QtWidgets.QCheckBox(
                 _("Show custom prompt box in popup")
@@ -830,6 +855,71 @@ class SettingsWindow(QtWidgets.QWidget):
 
     def show_button_visibility_dialog(self):
         PopupButtonVisibilityDialog(self.app, self).exec_()
+
+    def export_settings(self):
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self,
+            _("Export Writing Tools settings"),
+            "writing-tools-settings.json",
+            _("JSON files (*.json)")
+        )
+        if not path:
+            return
+        package = {
+            "format": "writing-tools-settings",
+            "format_version": 1,
+            "config": self.app.config,
+            "options": self.app.options,
+        }
+        try:
+            with open(path, "w", encoding="utf-8") as handle:
+                json.dump(package, handle, indent=2)
+            QtWidgets.QMessageBox.information(
+                self, _("Settings exported"), _("Your settings and prompt buttons were exported successfully.")
+            )
+        except (OSError, TypeError) as exc:
+            QtWidgets.QMessageBox.warning(self, _("Export failed"), str(exc))
+
+    def import_settings(self):
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            _("Import Writing Tools settings"),
+            "",
+            _("JSON files (*.json)")
+        )
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                package = json.load(handle)
+            if (
+                not isinstance(package, dict)
+                or package.get("format") != "writing-tools-settings"
+                or not isinstance(package.get("config"), dict)
+                or not isinstance(package.get("options"), dict)
+            ):
+                raise ValueError(_("This file is not a valid Writing Tools settings export."))
+            confirm = QtWidgets.QMessageBox.question(
+                self,
+                _("Replace current settings?"),
+                _("Importing will replace the current settings and prompt buttons. Continue?"),
+                QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
+                QtWidgets.QMessageBox.StandardButton.No,
+            )
+            if confirm != QtWidgets.QMessageBox.StandardButton.Yes:
+                return
+            self.app.save_config(package["config"])
+            self.app.save_options(package["options"])
+            self.app.load_config()
+            self.app.load_options()
+            self.app.register_hotkey()
+            QtWidgets.QMessageBox.information(
+                self,
+                _("Settings imported"),
+                _("Settings imported successfully. Close and reopen Writing Tools to refresh every window."),
+            )
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            QtWidgets.QMessageBox.warning(self, _("Import failed"), str(exc))
 
     def mark_prompt_deleted(self, option_name):
         editors = self.option_prompt_inputs.get(option_name)

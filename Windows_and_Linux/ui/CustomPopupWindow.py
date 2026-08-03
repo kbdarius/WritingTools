@@ -846,6 +846,7 @@ class CustomPopupWindow(QtWidgets.QWidget):
             }}
         """)
         self.close_button.clicked.connect(self.close)
+        top_bar.addStretch(1)
         top_bar.addWidget(self.close_button, 0, Qt.AlignRight)
         self.toolbar_layout = top_bar
         content_layout.addLayout(top_bar)

@@ -956,7 +956,7 @@ class WritingToolApp(QtWidgets.QApplication):
             popup_height = self.popup_window.height()
             # Calculate position
             x = cursor_pos.x()
-            y = cursor_pos.y() + 20  # 20 pixels below cursor
+            y = cursor_pos.y() + 46  # Keep the popup below the selected text/cursor area.
             # Adjust if the popup would go off the right edge of the screen
             if x + popup_width > screen_geometry.right():
                 x = screen_geometry.right() - popup_width
