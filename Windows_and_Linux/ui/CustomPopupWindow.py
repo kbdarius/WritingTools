@@ -191,6 +191,15 @@ class PinnedTextEditorDialog(QDialog):
         self.label_input.setPlaceholderText("Example: Company introduction")
         layout.addWidget(self.label_input)
 
+        group_caption = QLabel("Category (optional):")
+        group_caption.setStyleSheet(
+            f"color: {'#fff' if colorMode == 'dark' else '#333'}; font-weight: bold;"
+        )
+        layout.addWidget(group_caption)
+        self.group_input = QLineEdit(entry.get("group", ""))
+        self.group_input.setPlaceholderText("Example: Work, Personal, Email")
+        layout.addWidget(self.group_input)
+
         text_caption = QLabel("Text:")
         text_caption.setStyleSheet(
             f"color: {'#fff' if colorMode == 'dark' else '#333'}; font-weight: bold;"
@@ -210,7 +219,19 @@ class PinnedTextEditorDialog(QDialog):
         layout.addWidget(buttons)
 
     def values(self):
-        return self.text_input.toPlainText(), self.label_input.text().strip()
+        return (
+            self.text_input.toPlainText(),
+            self.label_input.text().strip(),
+            self.group_input.text().strip(),
+        )
+
+
+class PinnedTextTreeWidget(QtWidgets.QTreeWidget):
+    items_reordered = QtCore.Signal()
+
+    def dropEvent(self, event):
+        super().dropEvent(event)
+        self.items_reordered.emit()
 
 
 class PinnedTextDialog(QDialog):
@@ -237,9 +258,16 @@ class PinnedTextDialog(QDialog):
         layout.addWidget(intro)
 
         body = QHBoxLayout()
-        self.list_widget = QListWidget()
-        self.list_widget.currentRowChanged.connect(self._update_preview)
+        self.list_widget = PinnedTextTreeWidget()
+        self.list_widget.setHeaderHidden(True)
+        self.list_widget.setDragEnabled(True)
+        self.list_widget.setAcceptDrops(True)
+        self.list_widget.setDropIndicatorShown(True)
+        self.list_widget.setDragDropMode(QtWidgets.QAbstractItemView.DragDropMode.InternalMove)
+        self.list_widget.setDefaultDropAction(QtCore.Qt.DropAction.MoveAction)
+        self.list_widget.currentItemChanged.connect(self._update_preview)
         self.list_widget.itemDoubleClicked.connect(lambda _: self._edit_selected())
+        self.list_widget.items_reordered.connect(self._save_tree_order)
         self.list_widget.setMinimumWidth(240)
         body.addWidget(self.list_widget, 1)
 
@@ -303,25 +331,47 @@ class PinnedTextDialog(QDialog):
     def _refresh_list(self, select_index=0):
         self.list_widget.blockSignals(True)
         self.list_widget.clear()
+        groups = {}
+        top_level_nodes = []
         for entry in self.entries:
             text = (entry.get("text") or "").strip()
             summary = " ".join(text.split())
             if len(summary) > 60:
                 summary = summary[:60] + "..."
             label = (entry.get("label") or "").strip() or summary or "(blank)"
-            item = QListWidgetItem(label)
+            item = QtWidgets.QTreeWidgetItem([label])
             item.setData(Qt.ItemDataRole.UserRole, entry)
-            self.list_widget.addItem(item)
+            group = (entry.get("group") or "").strip()
+            if group:
+                if group not in groups:
+                    group_item = QtWidgets.QTreeWidgetItem([group])
+                    group_item.setData(Qt.ItemDataRole.UserRole + 1, group)
+                    groups[group] = group_item
+                    self.list_widget.addTopLevelItem(group_item)
+                    group_item.setExpanded(True)
+                    top_level_nodes.append(group_item)
+                groups[group].addChild(item)
+            else:
+                top_level_nodes.append(item)
+        # Group nodes were added immediately above; append ungrouped items and
+        # preserve the user's saved top-level order in a second pass.
+        self.list_widget.clear()
+        for node in top_level_nodes:
+            self.list_widget.addTopLevelItem(node)
         self.list_widget.blockSignals(False)
 
         if self.entries:
-            self.list_widget.setCurrentRow(min(select_index, len(self.entries) - 1))
+            self._select_entry(self.entries[min(select_index, len(self.entries) - 1)])
         else:
             self.preview.clear()
             self.status_label.setText("No pinned text saved yet.")
 
     def _selected_index(self):
-        return self.list_widget.currentRow()
+        item = self.list_widget.currentItem()
+        if item is None or item.parent() is None and item.childCount():
+            return -1
+        entry = item.data(0, Qt.ItemDataRole.UserRole)
+        return next((i for i, candidate in enumerate(self.entries) if candidate == entry), -1)
 
     def _selected_entry(self):
         index = self._selected_index()
@@ -329,21 +379,54 @@ class PinnedTextDialog(QDialog):
             return None, None
         return index, self.entries[index]
 
-    def _update_preview(self, row):
-        if row < 0 or row >= len(self.entries):
+    def _update_preview(self, item, _previous=None):
+        if item is None or item.parent() is None and item.childCount():
             self.preview.clear()
-            self.status_label.setText("No pinned text selected.")
+            self.status_label.setText("Select an item to preview it.")
             return
-        entry = self.entries[row]
+        entry = item.data(0, Qt.ItemDataRole.UserRole)
+        if not isinstance(entry, dict):
+            return
         text = entry.get("text", "")
         self.preview.setPlainText(text)
         source = entry.get("source", "manual").capitalize()
-        self.status_label.setText(f"{len(text):,} characters | Source: {source}")
+        group = (entry.get("group") or "").strip()
+        group_text = f" | Category: {group}" if group else ""
+        self.status_label.setText(f"{len(text):,} characters | Source: {source}{group_text}")
+
+    def _select_entry(self, entry):
+        iterator = QtWidgets.QTreeWidgetItemIterator(self.list_widget)
+        while iterator.value():
+            item = iterator.value()
+            if item.data(0, Qt.ItemDataRole.UserRole) == entry:
+                self.list_widget.setCurrentItem(item)
+                return
+            iterator += 1
+
+    def _save_tree_order(self):
+        ordered = []
+        for index in range(self.list_widget.topLevelItemCount()):
+            parent = self.list_widget.topLevelItem(index)
+            if parent.childCount():
+                group = parent.data(0, Qt.ItemDataRole.UserRole + 1) or parent.text(0)
+                for child_index in range(parent.childCount()):
+                    entry = parent.child(child_index).data(0, Qt.ItemDataRole.UserRole)
+                    if isinstance(entry, dict):
+                        entry["group"] = group
+                        ordered.append(entry)
+            else:
+                entry = parent.data(0, Qt.ItemDataRole.UserRole)
+                if isinstance(entry, dict):
+                    entry["group"] = ""
+                    ordered.append(entry)
+        if ordered:
+            self.entries = ordered
+            self._save()
 
     def _save(self):
         CustomPopupWindow.save_pinned_texts(self.entries)
 
-    def _store_text(self, text, source, label=""):
+    def _store_text(self, text, source, label="", group=""):
         text = (text or "").strip()
         if not text:
             QtWidgets.QMessageBox.information(self, "Pinned Text Library", "Nothing to add.")
@@ -359,6 +442,7 @@ class PinnedTextDialog(QDialog):
         self.entries.insert(0, {
             "text": text,
             "label": (label or "").strip(),
+            "group": (group or "").strip(),
             "source": source,
             "created_at": QtCore.QDateTime.currentDateTimeUtc().toString(QtCore.Qt.DateFormat.ISODate),
         })
@@ -376,17 +460,17 @@ class PinnedTextDialog(QDialog):
         dialog = PinnedTextEditorDialog(self, entry, "Edit Pinned Text" if index is not None else "Add Pinned Text")
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
-        text, label = dialog.values()
+        text, label, group = dialog.values()
         text = text.strip()
         if not text:
             QtWidgets.QMessageBox.information(self, "Pinned Text Library", "Text cannot be blank.")
             return
 
         if index is None:
-            self._store_text(text, source or entry.get("source", "manual"), label)
+            self._store_text(text, source or entry.get("source", "manual"), label, group)
             return
 
-        self.entries[index].update({"text": text, "label": label})
+        self.entries[index].update({"text": text, "label": label, "group": group})
         self._save()
         self._refresh_list(index)
 
@@ -1293,16 +1377,34 @@ class CustomPopupWindow(QtWidgets.QWidget):
             empty_action = menu.addAction(_("No pinned text saved"))
             empty_action.setEnabled(False)
         else:
+            groups = {}
+            ungrouped = []
             for entry in entries:
+                group = (entry.get("group") or "").strip()
+                if group:
+                    groups.setdefault(group, []).append(entry)
+                else:
+                    ungrouped.append(entry)
+
+            def add_entry_action(target_menu, entry):
                 text = " ".join((entry.get("text") or "").split())
                 label = (entry.get("label") or "").strip() or text[:60] or _("(blank)")
                 if len(label) > 60:
                     label = label[:60] + "..."
-                action = menu.addAction(label)
+                action = target_menu.addAction(label)
                 action.setToolTip(text)
                 action.triggered.connect(
                     lambda checked=False, text=entry.get("text", ""): self.paste_pinned_text(text)
                 )
+
+            for group, group_entries in groups.items():
+                group_menu = menu.addMenu(group)
+                for entry in group_entries:
+                    add_entry_action(group_menu, entry)
+            if groups and ungrouped:
+                menu.addSeparator()
+            for entry in ungrouped:
+                add_entry_action(menu, entry)
             menu.addSeparator()
             manage_action = menu.addAction(_("Manage pinned text..."))
             manage_action.triggered.connect(self.show_pinned_text_library)
