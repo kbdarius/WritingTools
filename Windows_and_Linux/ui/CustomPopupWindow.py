@@ -230,7 +230,22 @@ class PinnedTextTreeWidget(QtWidgets.QTreeWidget):
     items_reordered = QtCore.Signal()
 
     def dropEvent(self, event):
-        super().dropEvent(event)
+        # Categories may be reordered, but must stay top-level. Snippets can
+        # be dropped on a category or moved before/after another snippet.
+        target = self.itemAt(event.position().toPoint())
+        dragged_category = any(
+            item.data(0, Qt.ItemDataRole.UserRole + 1) is not None
+            for item in self.selectedItems()
+        )
+        original_flags = None
+        if target is not None and dragged_category:
+            original_flags = target.flags()
+            target.setFlags(original_flags & ~QtCore.Qt.ItemFlag.ItemIsDropEnabled)
+        try:
+            super().dropEvent(event)
+        finally:
+            if original_flags is not None:
+                target.setFlags(original_flags)
         self.items_reordered.emit()
 
 
@@ -265,6 +280,7 @@ class PinnedTextDialog(QDialog):
         self.list_widget.setDropIndicatorShown(True)
         self.list_widget.setDragDropMode(QtWidgets.QAbstractItemView.DragDropMode.InternalMove)
         self.list_widget.setDefaultDropAction(QtCore.Qt.DropAction.MoveAction)
+        self.list_widget.setDragDropOverwriteMode(False)
         self.list_widget.currentItemChanged.connect(self._update_preview)
         self.list_widget.itemDoubleClicked.connect(lambda _: self._edit_selected())
         self.list_widget.items_reordered.connect(self._save_tree_order)
@@ -340,12 +356,23 @@ class PinnedTextDialog(QDialog):
                 summary = summary[:60] + "..."
             label = (entry.get("label") or "").strip() or summary or "(blank)"
             item = QtWidgets.QTreeWidgetItem([label])
-            item.setData(Qt.ItemDataRole.UserRole, entry)
+            item.setData(0, Qt.ItemDataRole.UserRole, entry)
+            item.setFlags(
+                QtCore.Qt.ItemFlag.ItemIsEnabled
+                | QtCore.Qt.ItemFlag.ItemIsSelectable
+                | QtCore.Qt.ItemFlag.ItemIsDragEnabled
+            )
             group = str(entry.get("group") or "").strip()
             if group:
                 if group not in groups:
                     group_item = QtWidgets.QTreeWidgetItem([group])
-                    group_item.setData(Qt.ItemDataRole.UserRole + 1, group)
+                    group_item.setData(0, Qt.ItemDataRole.UserRole + 1, group)
+                    group_item.setFlags(
+                        QtCore.Qt.ItemFlag.ItemIsEnabled
+                        | QtCore.Qt.ItemFlag.ItemIsSelectable
+                        | QtCore.Qt.ItemFlag.ItemIsDragEnabled
+                        | QtCore.Qt.ItemFlag.ItemIsDropEnabled
+                    )
                     groups[group] = group_item
                     top_level_nodes.append(group_item)
                 groups[group].addChild(item)
