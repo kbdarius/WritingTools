@@ -529,7 +529,17 @@ class GeminiProvider(AIProvider):
         are passed at request time via `client.models.generate_content`, so we
         don't pre-instantiate a model here.
         """
-        self.client = genai.Client(api_key=self.api_key)
+        # Startup must remain usable on PCs where AI access is unavailable or
+        # has not been configured yet. The connection test is the explicit
+        # point where credentials and network access are checked.
+        if not self.api_key:
+            self.client = None
+            return
+        try:
+            self.client = genai.Client(api_key=self.api_key)
+        except Exception as exc:
+            logging.warning("Gemini client was not initialized: %s", exc)
+            self.client = None
 
     def before_load(self):
         self.client = None
