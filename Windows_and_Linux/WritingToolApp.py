@@ -19,7 +19,7 @@ import ui.ResponseWindow
 import ui.SettingsWindow
 import ui.SpeechControlWindow
 from aiprovider import AzureOpenAIProvider, GeminiProvider, OllamaProvider, OpenAICompatibleProvider, obfuscate_api_key
-from azure_speech import AzureSpeechService
+from azure_speech import AzureSpeechService, prepare_text_for_speech
 from local_speech import LocalSpeechService
 from pynput import keyboard as pykeyboard
 from PySide6 import QtCore, QtGui, QtWidgets
@@ -228,8 +228,12 @@ class WritingToolApp(QtWidgets.QApplication):
 
     def speak_with_read_aloud(self, text, status_callback=None, error_callback=None, metrics_context=None):
         service = self._get_read_aloud_service()
-        service.speak(
+        speech_text = prepare_text_for_speech(
             text,
+            self.config.get("azure_speech", {}).get("natural_reading", True),
+        )
+        service.speak(
+            speech_text,
             status_callback=status_callback,
             error_callback=error_callback,
             metrics_context=metrics_context,

@@ -31,6 +31,14 @@ _UUID_RE = re.compile(
 )
 _FENCED_CODE_RE = re.compile(r"```.*?```", re.DOTALL)
 _INLINE_CODE_RE = re.compile(r"`([^`]+)`")
+_MARKDOWN_HEADING_RE = re.compile(r"(?m)^\s{0,3}#{1,6}(?=\s|$)\s*")
+_MARKDOWN_QUOTE_RE = re.compile(r"(?m)^\s{0,3}>\s?")
+_MARKDOWN_LIST_RE = re.compile(r"(?m)^\s{0,3}(?:[-+*]|\d+[.)])\s+")
+_MARKDOWN_RULE_RE = re.compile(r"(?m)^\s{0,3}(?:[-*_]\s*){3,}$")
+_MARKDOWN_LINK_RE = re.compile(r"!?\[([^\]]*)\]\([^)]*\)")
+_MARKDOWN_DECORATION_RE = re.compile(
+    r"(?<!\w)(?:\*\*|__|~~|[*_])(?=\S)|(?<=\S)(?:\*\*|__|~~|[*_])(?!\w)"
+)
 _PATH_RE = re.compile(r"(?<!\w)(?:[A-Za-z]:)?(?:[\\/][^\s<>]+|[A-Za-z0-9_.-]+(?:[\\/][^\s<>]+)+)")
 _FILENAME_RE = re.compile(
     r"(?<![\w.-])([\w.-]+(?:_[\w.-]+)+\.[A-Za-z0-9]{1,8}|[\w.-]+\.(?:pdf|docx?|xlsx?|pptx?|txt|csv|json|xml|html?|py|js|ts|md|zip))\b",
@@ -45,13 +53,19 @@ def prepare_text_for_speech(text: str, natural_reading: bool = True) -> str:
     This pass is intentionally local and conservative. It removes details
     that are rarely useful when listening while preserving ordinary prose.
     """
-    cleaned = " ".join((text or "").split())
-    if not natural_reading or not cleaned:
-        return cleaned
-
     # Code is intentionally omitted rather than announced; the user asked
     # for prose-only listening, and even a short announcement is noise.
-    cleaned = _FENCED_CODE_RE.sub(" ", cleaned)
+    cleaned = _FENCED_CODE_RE.sub(" ", text or "")
+    # Keep Markdown's readable words while dropping its formatting markers.
+    cleaned = _MARKDOWN_LINK_RE.sub(r" \1 ", cleaned)
+    cleaned = _MARKDOWN_HEADING_RE.sub("", cleaned)
+    cleaned = _MARKDOWN_QUOTE_RE.sub("", cleaned)
+    cleaned = _MARKDOWN_LIST_RE.sub("", cleaned)
+    cleaned = _MARKDOWN_RULE_RE.sub(" ", cleaned)
+    cleaned = _MARKDOWN_DECORATION_RE.sub("", cleaned)
+    cleaned = " ".join(cleaned.split())
+    if not natural_reading or not cleaned:
+        return cleaned
 
     def url_replacement(match: re.Match) -> str:
         value = match.group(0)
