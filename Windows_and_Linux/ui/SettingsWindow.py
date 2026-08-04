@@ -20,10 +20,153 @@ from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QHBoxLayout, QRadioButton, QScrollArea
 
 from ui.AutostartManager import AutostartManager
-from ui.CustomPopupWindow import PopupButtonVisibilityDialog
+from ui.CustomPopupWindow import (
+    CustomPopupWindow,
+    PinnedTextEditorDialog,
+    PopupButtonVisibilityDialog,
+)
 from ui.UIUtils import UIUtils, colorMode
 
 _ = lambda x: x
+
+
+class PinnedTextSettingsPanel(QtWidgets.QWidget):
+    """Embedded pinned-text manager used as a reliable Settings fallback."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.entries = CustomPopupWindow.load_pinned_texts()
+
+        layout = QtWidgets.QVBoxLayout(self)
+        intro = QtWidgets.QLabel(
+            _("Manage reusable text snippets here. Categories are shown before their items.")
+        )
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+
+        self.list_widget = QtWidgets.QTreeWidget()
+        self.list_widget.setHeaderHidden(True)
+        self.list_widget.setMinimumHeight(230)
+        layout.addWidget(self.list_widget, 1)
+
+        self.preview = QtWidgets.QPlainTextEdit()
+        self.preview.setReadOnly(True)
+        self.preview.setPlaceholderText(_("Select an item to preview it here."))
+        self.preview.setMaximumHeight(110)
+        self.list_widget.currentItemChanged.connect(self._update_preview)
+        layout.addWidget(self.preview)
+
+        buttons = QtWidgets.QHBoxLayout()
+        for label, handler in (
+            (_("Add"), self._add),
+            (_("Edit"), self._edit),
+            (_("Delete"), self._delete),
+            (_("Export"), self._export),
+            (_("Import"), self._import),
+        ):
+            button = QtWidgets.QPushButton(label)
+            button.clicked.connect(handler)
+            buttons.addWidget(button)
+        layout.addLayout(buttons)
+        self._refresh()
+
+    def _refresh(self, selected=None):
+        self.list_widget.clear()
+        groups = {}
+        for entry in self.entries:
+            text = " ".join((entry.get("text") or "").split())
+            label = (entry.get("label") or "").strip() or text[:60] or _("(blank)")
+            group = str(entry.get("group") or "").strip()
+            if group:
+                if group not in groups:
+                    groups[group] = QtWidgets.QTreeWidgetItem([group])
+                    groups[group].setData(0, QtCore.Qt.ItemDataRole.UserRole + 1, group)
+                    self.list_widget.addTopLevelItem(groups[group])
+                    groups[group].setExpanded(True)
+                item = QtWidgets.QTreeWidgetItem([label])
+                groups[group].addChild(item)
+            else:
+                item = QtWidgets.QTreeWidgetItem([label])
+                self.list_widget.addTopLevelItem(item)
+            item.setData(0, QtCore.Qt.ItemDataRole.UserRole, entry)
+        if selected:
+            iterator = QtWidgets.QTreeWidgetItemIterator(self.list_widget)
+            while iterator.value():
+                item = iterator.value()
+                if item.data(0, QtCore.Qt.ItemDataRole.UserRole) == selected:
+                    self.list_widget.setCurrentItem(item)
+                    break
+                iterator += 1
+
+    def _selected(self):
+        item = self.list_widget.currentItem()
+        entry = item.data(0, QtCore.Qt.ItemDataRole.UserRole) if item else None
+        if not isinstance(entry, dict):
+            return None, None
+        index = next((i for i, value in enumerate(self.entries) if value == entry), -1)
+        return index, entry
+
+    def _update_preview(self, item, _previous=None):
+        entry = item.data(0, QtCore.Qt.ItemDataRole.UserRole) if item else None
+        self.preview.setPlainText(entry.get("text", "") if isinstance(entry, dict) else "")
+
+    def _edit_entry(self, entry, index=None):
+        dialog = PinnedTextEditorDialog(self, entry, _("Edit Pinned Text") if index is not None else _("Add Pinned Text"))
+        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return
+        text, label, group = dialog.values()
+        if not text.strip():
+            QtWidgets.QMessageBox.information(self, _("Pinned Text"), _("Text cannot be blank."))
+            return
+        if index is None:
+            self.entries.insert(0, {
+                "text": text.strip(), "label": label, "group": group,
+                "source": "manual",
+                "created_at": QtCore.QDateTime.currentDateTimeUtc().toString(QtCore.Qt.DateFormat.ISODate),
+            })
+            selected = self.entries[0]
+        else:
+            self.entries[index].update({"text": text.strip(), "label": label, "group": group})
+            selected = self.entries[index]
+        CustomPopupWindow.save_pinned_texts(self.entries)
+        self._refresh(selected)
+
+    def _add(self):
+        self._edit_entry({"source": "manual"})
+
+    def _edit(self):
+        index, entry = self._selected()
+        if entry:
+            self._edit_entry(entry.copy(), index)
+
+    def _delete(self):
+        index, entry = self._selected()
+        if entry and QtWidgets.QMessageBox.question(self, _("Delete pinned text"), _("Delete the selected item?")) == QtWidgets.QMessageBox.StandardButton.Yes:
+            del self.entries[index]
+            CustomPopupWindow.save_pinned_texts(self.entries)
+            self._refresh()
+
+    def _export(self):
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, _("Export pinned text"), "pinned-texts.json", "JSON files (*.json)")
+        if path:
+            with open(path, "w", encoding="utf-8") as handle:
+                json.dump(self.entries, handle, indent=2, ensure_ascii=False)
+
+    def _import(self):
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, _("Import pinned text"), "", "JSON files (*.json)")
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                entries = json.load(handle)
+            if not isinstance(entries, list) or not all(isinstance(item, dict) and item.get("text") for item in entries):
+                raise ValueError(_("This file is not a valid pinned text export."))
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            QtWidgets.QMessageBox.warning(self, _("Import failed"), str(exc))
+            return
+        self.entries = entries
+        CustomPopupWindow.save_pinned_texts(self.entries)
+        self._refresh()
 
 class SettingsWindow(QtWidgets.QWidget):
     """
@@ -286,13 +429,18 @@ class SettingsWindow(QtWidgets.QWidget):
         general_page, general_layout = create_scroll_page()
         prompts_page, prompts_layout = create_scroll_page()
         ai_page, ai_layout = create_scroll_page()
+        pinned_page, pinned_layout = create_scroll_page()
         if not self.providers_only:
             tabs.addTab(general_page, _("General"))
             tabs.addTab(prompts_page, _("Prompts"))
+            tabs.addTab(pinned_page, _("Pinned Text"))
         tabs.addTab(ai_page, _("AI Provider"))
         main_layout.addWidget(tabs)
 
         content_layout = general_layout
+
+        if not self.providers_only:
+            pinned_layout.addWidget(PinnedTextSettingsPanel(self))
 
         if not self.providers_only:
             title_label = QtWidgets.QLabel(_("Settings"))
