@@ -23,6 +23,7 @@ from ui.AutostartManager import AutostartManager
 from ui.CustomPopupWindow import (
     CustomPopupWindow,
     PinnedTextEditorDialog,
+    PinnedTextTreeWidget,
     PopupButtonVisibilityDialog,
 )
 from ui.UIUtils import UIUtils, colorMode
@@ -44,9 +45,15 @@ class PinnedTextSettingsPanel(QtWidgets.QWidget):
         intro.setWordWrap(True)
         layout.addWidget(intro)
 
-        self.list_widget = QtWidgets.QTreeWidget()
+        self.list_widget = PinnedTextTreeWidget()
         self.list_widget.setHeaderHidden(True)
         self.list_widget.setMinimumHeight(230)
+        self.list_widget.setDragEnabled(True)
+        self.list_widget.setAcceptDrops(True)
+        self.list_widget.setDropIndicatorShown(True)
+        self.list_widget.setDragDropMode(QtWidgets.QAbstractItemView.DragDropMode.InternalMove)
+        self.list_widget.setDefaultDropAction(QtCore.Qt.DropAction.MoveAction)
+        self.list_widget.setDragDropOverwriteMode(False)
         layout.addWidget(self.list_widget, 1)
 
         self.preview = QtWidgets.QPlainTextEdit()
@@ -54,6 +61,7 @@ class PinnedTextSettingsPanel(QtWidgets.QWidget):
         self.preview.setPlaceholderText(_("Select an item to preview it here."))
         self.preview.setMaximumHeight(110)
         self.list_widget.currentItemChanged.connect(self._update_preview)
+        self.list_widget.items_reordered.connect(self._save_tree_order)
         layout.addWidget(self.preview)
 
         buttons = QtWidgets.QHBoxLayout()
@@ -81,6 +89,12 @@ class PinnedTextSettingsPanel(QtWidgets.QWidget):
                 if group not in groups:
                     groups[group] = QtWidgets.QTreeWidgetItem([group])
                     groups[group].setData(0, QtCore.Qt.ItemDataRole.UserRole + 1, group)
+                    groups[group].setFlags(
+                        QtCore.Qt.ItemFlag.ItemIsEnabled
+                        | QtCore.Qt.ItemFlag.ItemIsSelectable
+                        | QtCore.Qt.ItemFlag.ItemIsDragEnabled
+                        | QtCore.Qt.ItemFlag.ItemIsDropEnabled
+                    )
                     self.list_widget.addTopLevelItem(groups[group])
                     groups[group].setExpanded(True)
                 item = QtWidgets.QTreeWidgetItem([label])
@@ -89,6 +103,11 @@ class PinnedTextSettingsPanel(QtWidgets.QWidget):
                 item = QtWidgets.QTreeWidgetItem([label])
                 self.list_widget.addTopLevelItem(item)
             item.setData(0, QtCore.Qt.ItemDataRole.UserRole, entry)
+            item.setFlags(
+                QtCore.Qt.ItemFlag.ItemIsEnabled
+                | QtCore.Qt.ItemFlag.ItemIsSelectable
+                | QtCore.Qt.ItemFlag.ItemIsDragEnabled
+            )
         if selected:
             iterator = QtWidgets.QTreeWidgetItemIterator(self.list_widget)
             while iterator.value():
@@ -97,6 +116,26 @@ class PinnedTextSettingsPanel(QtWidgets.QWidget):
                     self.list_widget.setCurrentItem(item)
                     break
                 iterator += 1
+
+    def _save_tree_order(self):
+        ordered = []
+        for index in range(self.list_widget.topLevelItemCount()):
+            parent = self.list_widget.topLevelItem(index)
+            if parent.childCount():
+                group = parent.data(0, QtCore.Qt.ItemDataRole.UserRole + 1) or parent.text(0)
+                for child_index in range(parent.childCount()):
+                    entry = parent.child(child_index).data(0, QtCore.Qt.ItemDataRole.UserRole)
+                    if isinstance(entry, dict):
+                        entry["group"] = str(group)
+                        ordered.append(entry)
+            else:
+                entry = parent.data(0, QtCore.Qt.ItemDataRole.UserRole)
+                if isinstance(entry, dict):
+                    entry["group"] = ""
+                    ordered.append(entry)
+        if ordered:
+            self.entries = ordered
+            CustomPopupWindow.save_pinned_texts(self.entries)
 
     def _selected(self):
         item = self.list_widget.currentItem()
@@ -212,6 +251,9 @@ class SettingsWindow(QtWidgets.QWidget):
         self._provider_drafts = {}
         self._active_provider_index = None
         self._azure_install_in_progress = False
+        self.settings_tabs = None
+        self.pinned_text_panel = None
+        self.pinned_text_page = None
         self.init_ui()
         self.validation_finished.connect(self._finish_provider_validation)
         self.azure_test_finished.connect(self._finish_azure_speech_test)
@@ -425,11 +467,13 @@ class SettingsWindow(QtWidgets.QWidget):
             return scroll, layout
 
         tabs = QtWidgets.QTabWidget()
+        self.settings_tabs = tabs
         tabs.setDocumentMode(True)
         general_page, general_layout = create_scroll_page()
         prompts_page, prompts_layout = create_scroll_page()
         ai_page, ai_layout = create_scroll_page()
         pinned_page, pinned_layout = create_scroll_page()
+        self.pinned_text_page = pinned_page
         if not self.providers_only:
             tabs.addTab(general_page, _("General"))
             tabs.addTab(prompts_page, _("Prompts"))
@@ -440,7 +484,8 @@ class SettingsWindow(QtWidgets.QWidget):
         content_layout = general_layout
 
         if not self.providers_only:
-            pinned_layout.addWidget(PinnedTextSettingsPanel(self))
+            self.pinned_text_panel = PinnedTextSettingsPanel(self)
+            pinned_layout.addWidget(self.pinned_text_panel)
 
         if not self.providers_only:
             title_label = QtWidgets.QLabel(_("Settings"))
@@ -995,6 +1040,13 @@ class SettingsWindow(QtWidgets.QWidget):
         max_height = int(screen.height() * 0.85)  # 85% of screen height
         desired_height = min(720, max_height)  # Cap at 720px or 85% of screen height
         self.resize(592, desired_height)  # Use an exact width of 592px so stuff looks good!
+
+    def select_tab(self, tab_name):
+        """Select a Settings tab when another UI entry point requests it."""
+        if tab_name == "pinned_text" and self.settings_tabs is not None:
+            index = self.settings_tabs.indexOf(self.pinned_text_page)
+            if index >= 0:
+                self.settings_tabs.setCurrentIndex(index)
 
     @staticmethod
     def toggle_autostart(state):

@@ -1652,14 +1652,17 @@ class WritingToolApp(QtWidgets.QApplication):
         # Start the thread
         threading.Thread(target=process_thread, daemon=True).start()
 
-    def show_settings(self, providers_only=False):
+    def show_settings(self, providers_only=False, settings_tab=None):
         """
         Show the settings window.
         """
         # Let the tray menu finish closing before raising the settings window.
-        QtCore.QTimer.singleShot(0, lambda: self._open_settings_window(providers_only))
+        QtCore.QTimer.singleShot(
+            0,
+            lambda: self._open_settings_window(providers_only, settings_tab),
+        )
 
-    def _open_settings_window(self, providers_only=False):
+    def _open_settings_window(self, providers_only=False, settings_tab=None):
         logging.debug('Showing settings window')
         if self.settings_window is None or not self.settings_window.isVisible() or providers_only:
             self.settings_window = ui.SettingsWindow.SettingsWindow(self, providers_only=providers_only)
@@ -1668,6 +1671,8 @@ class WritingToolApp(QtWidgets.QApplication):
         self.settings_window.show()
         self.settings_window.raise_()
         self.settings_window.activateWindow()
+        if settings_tab:
+            self.settings_window.select_tab(settings_tab)
 
 
     def show_about(self):

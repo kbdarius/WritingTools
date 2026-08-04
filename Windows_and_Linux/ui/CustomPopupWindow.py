@@ -1374,8 +1374,7 @@ class CustomPopupWindow(QtWidgets.QWidget):
         self.adjustSize()
 
     def show_pinned_text_library(self):
-        dialog = PinnedTextDialog(self, self)
-        dialog.exec()
+        self.app.show_settings(settings_tab="pinned_text")
 
     def show_pencil_menu(self):
         if self.edit_mode:
