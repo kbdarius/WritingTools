@@ -341,23 +341,20 @@ class PinnedTextDialog(QDialog):
             label = (entry.get("label") or "").strip() or summary or "(blank)"
             item = QtWidgets.QTreeWidgetItem([label])
             item.setData(Qt.ItemDataRole.UserRole, entry)
-            group = (entry.get("group") or "").strip()
+            group = str(entry.get("group") or "").strip()
             if group:
                 if group not in groups:
                     group_item = QtWidgets.QTreeWidgetItem([group])
                     group_item.setData(Qt.ItemDataRole.UserRole + 1, group)
                     groups[group] = group_item
-                    self.list_widget.addTopLevelItem(group_item)
-                    group_item.setExpanded(True)
                     top_level_nodes.append(group_item)
                 groups[group].addChild(item)
             else:
                 top_level_nodes.append(item)
-        # Group nodes were added immediately above; append ungrouped items and
-        # preserve the user's saved top-level order in a second pass.
-        self.list_widget.clear()
         for node in top_level_nodes:
             self.list_widget.addTopLevelItem(node)
+            if node.childCount():
+                node.setExpanded(True)
         self.list_widget.blockSignals(False)
 
         if self.entries:
