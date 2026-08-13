@@ -1382,10 +1382,13 @@ class CustomPopupWindow(QtWidgets.QWidget):
             return
 
         menu = QtWidgets.QMenu(self)
-        edit_actions = menu.addAction(_("Edit popup buttons"))
-        manage_pinned = menu.addAction(_("Manage pinned text"))
-        open_settings = menu.addAction(_("Open main settings"))
-        chosen = menu.exec(self.edit_button.mapToGlobal(self.edit_button.rect().bottomLeft()))
+        try:
+            edit_actions = menu.addAction(_("Edit popup buttons"))
+            manage_pinned = menu.addAction(_("Manage pinned text"))
+            open_settings = menu.addAction(_("Open main settings"))
+            chosen = menu.exec(self.edit_button.mapToGlobal(self.edit_button.rect().bottomLeft()))
+        finally:
+            menu.deleteLater()
         if chosen is edit_actions:
             self.toggle_edit_mode()
         elif chosen is manage_pinned:
@@ -1432,7 +1435,10 @@ class CustomPopupWindow(QtWidgets.QWidget):
             manage_action = menu.addAction(_("Manage pinned text..."))
             manage_action.triggered.connect(self.show_pinned_text_library)
 
-        menu.exec(self.list_button.mapToGlobal(self.list_button.rect().bottomLeft()))
+        try:
+            menu.exec(self.list_button.mapToGlobal(self.list_button.rect().bottomLeft()))
+        finally:
+            menu.deleteLater()
 
     def paste_pinned_text(self, text):
         if hasattr(self.app, "_restore_target_and_paste"):

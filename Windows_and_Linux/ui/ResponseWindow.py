@@ -312,6 +312,8 @@ class ResponseWindow(QtWidgets.QWidget):
         self.loading_container = None
         self.chat_area = None
         self.chat_history = []
+        self._followup_signal_connected = False
+        self.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, True)
 
         # Setup thinking animation with full range of dots
         self.thinking_timer = QtCore.QTimer(self)
@@ -323,6 +325,7 @@ class ResponseWindow(QtWidgets.QWidget):
         self.init_ui()
         logging.debug('Connecting response signals')
         self.app.followup_response_signal.connect(self.handle_followup_response)
+        self._followup_signal_connected = True
         logging.debug('Response signals connected')
 
         # Set initial size for "Thinking..." state
@@ -799,15 +802,22 @@ class ResponseWindow(QtWidgets.QWidget):
         
     def closeEvent(self, event):
         """Handle window close event"""
+        if self._followup_signal_connected:
+            try:
+                self.app.followup_response_signal.disconnect(self.handle_followup_response)
+            except (RuntimeError, TypeError):
+                pass
+            self._followup_signal_connected = False
+        self.thinking_timer.stop()
+
         # Save zoom factor to main config
         if hasattr(self, 'current_text_display'):
             self.app.config['response_window_zoom'] = self.current_text_display.zoom_factor
             self.app.save_config(self.app.config)
 
         self.chat_history = []
-        
-        if hasattr(self.app, 'current_response_window'):
+        self.selected_text = None
+        if getattr(self.app, 'current_response_window', None) is self:
             delattr(self.app, 'current_response_window')
         
-
         super().closeEvent(event)

@@ -84,6 +84,7 @@ class SpeechMetricsRecorder:
                         encoding="utf-8",
                     )
                 self._append_csv(record)
+                self._compact_csv_if_needed()
         except Exception:
             # Metrics must never break or delay Read Aloud.
             return
@@ -103,6 +104,19 @@ class SpeechMetricsRecorder:
                 ",".join(self._csv_escape(str(record.get(name, ""))) for name in header_fields)
                 + "\n"
             )
+
+    def _compact_csv_if_needed(self) -> None:
+        if not self.csv_path.exists() or self.csv_path.stat().st_size <= self.COMPACT_AFTER_BYTES:
+            return
+        lines = self.csv_path.read_text(encoding="utf-8").splitlines()
+        if len(lines) <= self.MAX_RECORDS + 1:
+            return
+        header = lines[0]
+        retained = lines[-self.MAX_RECORDS:]
+        self.csv_path.write_text(
+            "\n".join([header, *retained]) + "\n",
+            encoding="utf-8",
+        )
 
     @staticmethod
     def _csv_escape(value: str) -> str:

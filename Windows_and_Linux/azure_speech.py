@@ -301,6 +301,19 @@ class AzureSpeechService:
         self._requested_sentence: Optional[int] = None
         self._rate = self._normalize_rate(config.get("read_aloud_rate", 1.0))
         self.metrics = SpeechMetricsRecorder()
+        self._cleanup_stale_audio()
+
+    def _cleanup_stale_audio(self) -> None:
+        """Remove abandoned speech files left by interrupted sessions."""
+        if not self.audio_dir.exists():
+            return
+        cutoff = time.time() - 24 * 60 * 60
+        for audio_path in self.audio_dir.glob("*.wav"):
+            try:
+                if audio_path.stat().st_mtime < cutoff:
+                    audio_path.unlink()
+            except OSError:
+                logging.debug("Could not remove stale speech audio: %s", audio_path, exc_info=True)
 
     def speak(
         self,

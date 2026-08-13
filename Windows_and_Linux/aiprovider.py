@@ -49,6 +49,16 @@ from PySide6 import QtWidgets
 from PySide6.QtWidgets import QVBoxLayout
 from ui.UIUtils import colorMode
 
+
+def _close_resource(resource) -> None:
+    close = getattr(resource, "close", None)
+    if callable(close):
+        try:
+            close()
+        except Exception:
+            logging.debug("Provider resource cleanup failed", exc_info=True)
+
+
 # Obfuscation prefix to identify encrypted API keys
 _OBFUSCATION_PREFIX = "enc:"
 _XOR_KEY = 0x5A  # Simple XOR key for obfuscation
@@ -301,6 +311,7 @@ class AIProvider(ABC):
         """
         Load configuration settings into the provider.
         """
+        self.before_load()
         for setting in self.settings:
             if setting.name in config:
                 setattr(self, setting.name, config[setting.name])
@@ -308,6 +319,11 @@ class AIProvider(ABC):
             else:
                 setattr(self, setting.name, setting.default_value)
         self.after_load()
+
+    def _close_client(self):
+        client = getattr(self, "client", None)
+        self.client = None
+        _close_resource(client)
 
     def save_config(self):
         """
@@ -542,12 +558,13 @@ class GeminiProvider(AIProvider):
             self.client = None
 
     def before_load(self):
-        self.client = None
+        self._close_client()
 
     def cancel(self):
         self.close_requested = True
 
     def validate_connection(self, config: dict):
+        client = None
         try:
             api_key = deobfuscate_api_key(config.get("api_key", "")).strip()
             model_name = config.get("model_name", "").strip()
@@ -564,6 +581,8 @@ class GeminiProvider(AIProvider):
             return True, f"Connected to {model_name}."
         except Exception as exc:
             return False, f"Gemini connection failed: {exc}"
+        finally:
+            _close_resource(client)
 
 
 class OpenAICompatibleProvider(AIProvider):
@@ -657,12 +676,13 @@ class OpenAICompatibleProvider(AIProvider):
         )
 
     def before_load(self):
-        self.client = None
+        self._close_client()
 
     def cancel(self):
         self.close_requested = True
 
     def validate_connection(self, config: dict):
+        client = None
         try:
             api_key = deobfuscate_api_key(config.get("api_key", "")).strip()
             api_base = config.get("api_base", "").strip()
@@ -686,6 +706,8 @@ class OpenAICompatibleProvider(AIProvider):
             return True, f"Connected to {model}."
         except Exception as exc:
             return False, f"Connection failed: {exc}"
+        finally:
+            _close_resource(client)
 
 
 class AzureOpenAIProvider(OpenAICompatibleProvider):
@@ -803,6 +825,8 @@ class GitHubModelsProvider(OpenAICompatibleProvider):
         self.app.save_config(self.app.config)
 
     def validate_connection(self, config: dict):
+        client = None
+        http_client = None
         try:
             api_key = deobfuscate_api_key(config.get("api_key", "")).strip()
             model = config.get("api_model", "").strip()
@@ -836,6 +860,9 @@ class GitHubModelsProvider(OpenAICompatibleProvider):
             return True, f"Connected to {model} through GitHub Models."
         except Exception as exc:
             return False, f"GitHub Models connection failed: {exc}"
+        finally:
+            _close_resource(client)
+            _close_resource(http_client)
 
     def after_load(self):
         self.api_base = self.API_BASE
@@ -910,7 +937,7 @@ class OllamaProvider(AIProvider):
         self.client = OllamaClient(host=self.api_base)
 
     def before_load(self):
-        self.client = None
+        self._close_client()
 
     def cancel(self):
         self.close_requested = True
