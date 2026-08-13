@@ -88,7 +88,7 @@ What the script does:
 - Installs the Python requirements from `Windows_and_Linux\requirements.txt`.
 - Runs the existing PyInstaller build script.
 - Copies the finished executable into the repository root.
-- Stops any running `Writing Tools v*.exe` processes from previous releases in this folder, deletes old versioned executables, and launches the newly built executable.
+- Stops any running `Writing Tools v*.exe` processes, including an already-running copy of the new version, deletes old versioned executables, and launches the release instance through the finalizer.
 
 The old executable cleanup and new launch are enforced by:
 
@@ -107,7 +107,18 @@ After build, confirm the new exe is the only versioned executable:
 Get-ChildItem '.\Writing Tools v*.exe' | Select-Object Name, LastWriteTime
 ```
 
-If old versions remain, manually terminate them and re-run the finalize script:
+Confirm no older executable process is still running:
+
+```powershell
+Get-CimInstance Win32_Process |
+    Where-Object { $_.ExecutablePath -like "$PWD\Writing Tools v*.exe" } |
+    Select-Object ProcessId, ExecutablePath
+```
+
+The result must contain only the current release path. Do not manually launch the
+new executable after `build-windows.bat`; the build script already launches it.
+
+If old versions remain, stop the locked old processes, then re-run the finalize script:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Windows_and_Linux\finalize-windows-build.ps1 -RepoRoot . -ExeName (Get-ChildItem .\dist\* -Filter 'Writing Tools v*.exe' | Sort-Object LastWriteTime -Descending | Select-Object -First 1).Name
