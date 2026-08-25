@@ -27,6 +27,7 @@ from PySide6.QtCore import QLocale, Signal, Slot
 from PySide6.QtGui import QCursor, QGuiApplication
 from PySide6.QtWidgets import QApplication, QMessageBox
 from update_checker import UpdateChecker
+from ui.UIUtils import resource_path
 from version import APP_DISPLAY_NAME, APP_VERSION
 from word_speech import WordSpeechService
 
@@ -939,7 +940,7 @@ class WritingToolApp(QtWidgets.QApplication):
             self.popup_window = ui.CustomPopupWindow.CustomPopupWindow(self)
 
             # Set the window icon
-            icon_path = os.path.join(os.path.dirname(sys.argv[0]), 'icons', 'app_icon.png')
+            icon_path = resource_path('icons', 'app_icon.png')
             if os.path.exists(icon_path): self.setWindowIcon(QtGui.QIcon(icon_path))
             # Get the screen containing the cursor
             cursor_pos = QCursor.pos()
@@ -1439,7 +1440,7 @@ class WritingToolApp(QtWidgets.QApplication):
             return
 
         logging.debug('Creating system tray icon')
-        icon_path = os.path.join(os.path.dirname(sys.argv[0]), 'icons', 'app_icon.png')
+        icon_path = resource_path('icons', 'app_icon.png')
         if not os.path.exists(icon_path):
             logging.warning(f'Tray icon not found at {icon_path}')
             # Use a default icon if not found

@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ui.UIUtils import ThemeBackground, colorMode
+from ui.UIUtils import ThemeBackground, colorMode, resource_path
 from version import APP_DISPLAY_NAME, APP_VERSION
 
 _ = lambda x: x
@@ -900,9 +900,10 @@ class CustomPopupWindow(QtWidgets.QWidget):
 
         # The "Edit"/"Done" button (left), same exact size as close button
         self.edit_button = QPushButton()
-        pencil_icon = os.path.join(os.path.dirname(sys.argv[0]),
-                                'icons',
-                                'pencil' + ('_dark' if colorMode=='dark' else '_light') + '.png')
+        pencil_icon = resource_path(
+            'icons',
+            'pencil' + ('_dark' if colorMode=='dark' else '_light') + '.png'
+        )
         if os.path.exists(pencil_icon):
             self.edit_button.setIcon(QtGui.QIcon(pencil_icon))
         # Reduced size to keep the popup compact.
@@ -924,8 +925,7 @@ class CustomPopupWindow(QtWidgets.QWidget):
         top_bar.addWidget(self.edit_button, 0, Qt.AlignLeft)
 
         self.list_button = QPushButton()
-        list_icon = os.path.join(
-            os.path.dirname(sys.argv[0]),
+        list_icon = resource_path(
             'icons',
             'list' + ('_dark' if colorMode == 'dark' else '_light') + '.png'
         )
@@ -972,8 +972,10 @@ class CustomPopupWindow(QtWidgets.QWidget):
 
         # The "Reset" button (edit-mode only) - also 24x24
         self.reset_button = QPushButton()
-        reset_icon_path = os.path.join(os.path.dirname(sys.argv[0]), 'icons',
-                                    'restore' + ('_dark' if colorMode=='dark' else '_light') + '.png')
+        reset_icon_path = resource_path(
+            'icons',
+            'restore' + ('_dark' if colorMode=='dark' else '_light') + '.png'
+        )
         if os.path.exists(reset_icon_path):
             self.reset_button.setIcon(QtGui.QIcon(reset_icon_path))
         self.reset_button.setText("")
@@ -1040,9 +1042,10 @@ class CustomPopupWindow(QtWidgets.QWidget):
         input_layout.addWidget(self.custom_input)
         
         send_btn = QPushButton()
-        send_icon = os.path.join(os.path.dirname(sys.argv[0]),
-                                'icons',
-                                'send' + ('_dark' if colorMode=='dark' else '_light') + '.png')
+        send_icon = resource_path(
+            'icons',
+            'send' + ('_dark' if colorMode=='dark' else '_light') + '.png'
+        )
         if os.path.exists(send_icon):
             send_btn.setIcon(QtGui.QIcon(send_icon))
         send_btn.setStyleSheet(f"""
@@ -1142,8 +1145,9 @@ class CustomPopupWindow(QtWidgets.QWidget):
                     QtWidgets.QStyle.StandardPixmap.SP_MediaVolume
                 ))
             else:
-                icon_path = os.path.join(os.path.dirname(sys.argv[0]),
-                                        v["icon"] + ('_dark' if colorMode=='dark' else '_light') + '.png')
+                icon_path = resource_path(
+                    v["icon"] + ('_dark' if colorMode=='dark' else '_light') + '.png'
+                )
                 if os.path.exists(icon_path):
                     b.setIcon(QtGui.QIcon(icon_path))
 
@@ -1187,8 +1191,7 @@ class CustomPopupWindow(QtWidgets.QWidget):
 
         if not self.edit_mode:
             copy_button = QtWidgets.QToolButton()
-            copy_icon = os.path.join(
-                os.path.dirname(sys.argv[0]),
+            copy_icon = resource_path(
                 'icons',
                 'copy' + ('_dark' if colorMode == 'dark' else '_light') + '.png'
             )

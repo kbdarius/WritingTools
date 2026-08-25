@@ -27,6 +27,7 @@ def run_pyinstaller_build():
         "--onefile",
         "--windowed",
         "--icon=icons/app_icon.ico",
+        "--add-data", "icons;icons",
         f"--name={APP_DISPLAY_NAME}",
         "--clean",
         "--noconfirm",
