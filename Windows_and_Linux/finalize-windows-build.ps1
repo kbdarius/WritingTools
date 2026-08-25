@@ -55,8 +55,39 @@ if ($oldPaths.Count -gt 0) {
         Remove-Item -LiteralPath $oldExecutable.FullName -Force
         Write-Host "Deleted old executable: $($oldExecutable.Name)"
     }
+
+    $remainingOldProcesses = @(
+        Get-CimInstance Win32_Process |
+            Where-Object { $_.ExecutablePath -and $oldPaths.Contains($_.ExecutablePath) }
+    )
+    if ($remainingOldProcesses.Count -gt 0) {
+        $remaining = ($remainingOldProcesses | ForEach-Object { "$($_.Name) (PID $($_.ProcessId))" }) -join ', '
+        throw "Older Writing Tools processes are still running: $remaining"
+    }
+
+    $remainingOldExecutables = @(
+        Get-ChildItem -LiteralPath $resolvedRepoRoot -Filter 'Writing Tools v*.exe' -File |
+            Where-Object { $_.FullName -ne $newExePath }
+    )
+    if ($remainingOldExecutables.Count -gt 0) {
+        $remaining = ($remainingOldExecutables | ForEach-Object { $_.Name }) -join ', '
+        throw "Older Writing Tools executables still exist: $remaining"
+    }
 } else {
     Write-Host "No previous versioned Executable found to remove."
+}
+
+# Avoid duplicate instances when a previous manual launch used this same version.
+$existingNewProcesses = @(
+    Get-CimInstance Win32_Process |
+        Where-Object { $_.ExecutablePath -eq $newExePath }
+)
+foreach ($existingNewProcess in $existingNewProcesses) {
+    Write-Host "Stopping existing $($existingNewProcess.Name) (PID $($existingNewProcess.ProcessId)) before relaunch..."
+    Stop-Process -Id $existingNewProcess.ProcessId -Force -ErrorAction Stop
+}
+if ($existingNewProcesses.Count -gt 0) {
+    Start-Sleep -Milliseconds 750
 }
 
 Write-Host "Launching latest executable: $ExeName..."
@@ -70,6 +101,20 @@ $newProcess = @(
 )
 if ($newProcess.Count -eq 0) {
     throw "The new Writing Tools executable did not remain running."
+}
+
+$unexpectedOldProcesses = @(
+    Get-CimInstance Win32_Process |
+        Where-Object {
+            $_.ExecutablePath -and
+            $_.ExecutablePath.StartsWith($resolvedRepoRoot + '\', [StringComparison]::OrdinalIgnoreCase) -and
+            [IO.Path]::GetFileName($_.ExecutablePath) -like 'Writing Tools v*.exe' -and
+            $_.ExecutablePath -ne $newExePath
+        }
+)
+if ($unexpectedOldProcesses.Count -gt 0) {
+    $remaining = ($unexpectedOldProcesses | ForEach-Object { "$($_.Name) (PID $($_.ProcessId))" }) -join ', '
+    throw "An older Writing Tools process is still running after launch: $remaining"
 }
 
 Write-Host "$ExeName is running."
