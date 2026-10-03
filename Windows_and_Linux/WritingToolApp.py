@@ -1665,15 +1665,48 @@ class WritingToolApp(QtWidgets.QApplication):
 
     def _open_settings_window(self, providers_only=False, settings_tab=None):
         logging.debug('Showing settings window')
-        if self.settings_window is None or not self.settings_window.isVisible() or providers_only:
-            self.settings_window = ui.SettingsWindow.SettingsWindow(self, providers_only=providers_only)
-            self.settings_window.close_signal.connect(self.exit_app)
-            self.settings_window.retranslate_ui()
-        self.settings_window.show()
-        self.settings_window.raise_()
-        self.settings_window.activateWindow()
-        if settings_tab:
-            self.settings_window.select_tab(settings_tab)
+        # The popup is always-on-top. Hide it before opening Settings so it
+        # cannot leave a newly created Settings window behind it.
+        if self.popup_window is not None and self.popup_window.isVisible():
+            self.popup_window.hide()
+
+        created = False
+        try:
+            if self.settings_window is None or not self.settings_window.isVisible() or providers_only:
+                self.settings_window = ui.SettingsWindow.SettingsWindow(
+                    self,
+                    providers_only=providers_only,
+                )
+                self.settings_window.close_signal.connect(self.exit_app)
+                self.settings_window.retranslate_ui()
+                created = True
+
+            # Restore a minimized window and make sure a window left on a
+            # disconnected monitor is brought back onto the active screen.
+            self.settings_window.showNormal()
+            self.settings_window.show()
+            if created or not any(
+                screen.availableGeometry().intersects(self.settings_window.frameGeometry())
+                for screen in QGuiApplication.screens()
+            ):
+                screen = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
+                if screen is not None:
+                    frame = self.settings_window.frameGeometry()
+                    frame.moveCenter(screen.availableGeometry().center())
+                    self.settings_window.move(frame.topLeft())
+
+            if settings_tab:
+                self.settings_window.select_tab(settings_tab)
+            self.settings_window.raise_()
+            self.settings_window.activateWindow()
+            logging.debug('Settings window shown successfully')
+        except Exception:
+            logging.exception('Unable to open Settings window')
+            self.settings_window = None
+            self.show_message_signal.emit(
+                'Settings',
+                'Writing Tools could not open Settings. Please restart the application and try again.',
+            )
 
 
     def show_about(self):
