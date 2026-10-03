@@ -156,6 +156,18 @@ class SpeechControlWindow(QtWidgets.QWidget):
         self.move(x, y)
         self.show()
 
+    def show_at_lower_right(self):
+        """Show controls away from the selected text in the active monitor."""
+        self.adjustSize()
+        cursor = QtGui.QCursor.pos()
+        screen = QtGui.QGuiApplication.screenAt(cursor) or QtGui.QGuiApplication.primaryScreen()
+        available = screen.availableGeometry()
+        margin = 14
+        x = available.right() - self.width() - margin + 1
+        y = available.bottom() - self.height() - margin + 1
+        self.move(max(x, available.left()), max(y, available.top()))
+        self.show()
+
     def mousePressEvent(self, event):
         if event.button() == QtCore.Qt.MouseButton.LeftButton:
             child = self.childAt(event.position().toPoint())

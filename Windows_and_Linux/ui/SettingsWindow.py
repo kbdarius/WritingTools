@@ -149,8 +149,21 @@ class PinnedTextSettingsPanel(QtWidgets.QWidget):
         entry = item.data(0, QtCore.Qt.ItemDataRole.UserRole) if item else None
         self.preview.setPlainText(entry.get("text", "") if isinstance(entry, dict) else "")
 
+    def _categories(self):
+        categories = []
+        for entry in self.entries:
+            category = str(entry.get("group") or "").strip()
+            if category and category not in categories:
+                categories.append(category)
+        return categories
+
     def _edit_entry(self, entry, index=None):
-        dialog = PinnedTextEditorDialog(self, entry, _("Edit Pinned Text") if index is not None else _("Add Pinned Text"))
+        dialog = PinnedTextEditorDialog(
+            self,
+            entry,
+            _("Edit Pinned Text") if index is not None else _("Add Pinned Text"),
+            categories=self._categories(),
+        )
         if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             return
         text, label, group = dialog.values()

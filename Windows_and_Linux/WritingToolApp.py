@@ -1268,7 +1268,7 @@ class WritingToolApp(QtWidgets.QApplication):
             self._enable_speech_cancel_hotkey()
             if self.speech_progress_dialog is None:
                 self.speech_progress_dialog = ui.SpeechControlWindow.SpeechControlWindow(self)
-                self.speech_progress_dialog.show_near_cursor()
+                self.speech_progress_dialog.show_at_lower_right()
             if message.startswith('Reading with Azure Speech'):
                 self.speech_progress_dialog.set_playing(message)
             else:

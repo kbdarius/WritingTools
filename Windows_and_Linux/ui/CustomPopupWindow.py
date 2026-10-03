@@ -174,7 +174,7 @@ class PopupButtonVisibilityDialog(QDialog):
 class PinnedTextEditorDialog(QDialog):
     """Edit one pinned text item and its optional display label."""
 
-    def __init__(self, parent=None, entry=None, title="Pinned Text"):
+    def __init__(self, parent=None, entry=None, title="Pinned Text", categories=None):
         super().__init__(parent)
         entry = entry or {}
         self.setWindowTitle(title)
@@ -196,8 +196,24 @@ class PinnedTextEditorDialog(QDialog):
             f"color: {'#fff' if colorMode == 'dark' else '#333'}; font-weight: bold;"
         )
         layout.addWidget(group_caption)
-        self.group_input = QLineEdit(entry.get("group", ""))
-        self.group_input.setPlaceholderText("Example: Work, Personal, Email")
+        self.group_input = QtWidgets.QComboBox()
+        self.group_input.setEditable(True)
+        self.group_input.setInsertPolicy(QtWidgets.QComboBox.InsertPolicy.NoInsert)
+        self.group_input.setPlaceholderText("Choose a category or type a new one")
+        self.group_input.addItem("", "")
+        category_names = []
+        for category in categories or []:
+            category = str(category or "").strip()
+            if category and category not in category_names:
+                category_names.append(category)
+        current_category = str(entry.get("group", "") or "").strip()
+        if current_category and current_category not in category_names:
+            category_names.append(current_category)
+        self.group_input.addItems(category_names)
+        if current_category:
+            self.group_input.setCurrentText(current_category)
+        else:
+            self.group_input.setCurrentIndex(0)
         layout.addWidget(self.group_input)
 
         text_caption = QLabel("Text:")
@@ -222,30 +238,90 @@ class PinnedTextEditorDialog(QDialog):
         return (
             self.text_input.toPlainText(),
             self.label_input.text().strip(),
-            self.group_input.text().strip(),
+            self.group_input.currentText().strip(),
         )
 
 
 class PinnedTextTreeWidget(QtWidgets.QTreeWidget):
     items_reordered = QtCore.Signal()
 
+    @staticmethod
+    def _is_category(item):
+        return item is not None and item.data(0, Qt.ItemDataRole.UserRole + 1) is not None
+
+    def _remove_item(self, item):
+        parent = item.parent()
+        if parent is not None:
+            parent.takeChild(parent.indexOfChild(item))
+        else:
+            self.takeTopLevelItem(self.indexOfTopLevelItem(item))
+
+    def _insert_before_or_after(self, item, target, after):
+        parent = target.parent()
+        self._remove_item(item)
+        if parent is None:
+            index = self.indexOfTopLevelItem(target)
+            self.insertTopLevelItem(index + (1 if after else 0), item)
+        else:
+            index = parent.indexOfChild(target)
+            parent.insertChild(index + (1 if after else 0), item)
+
+    def _drop_is_after(self, target, position):
+        if position == QtWidgets.QAbstractItemView.DropIndicatorPosition.BelowItem:
+            return True
+        if position == QtWidgets.QAbstractItemView.DropIndicatorPosition.AboveItem:
+            return False
+        if target is None:
+            return True
+        return self.visualItemRect(target).center().y() < self._drop_y
+
     def dropEvent(self, event):
-        # Categories may be reordered, but must stay top-level. Snippets can
-        # be dropped on a category or moved before/after another snippet.
-        target = self.itemAt(event.position().toPoint())
-        dragged_category = any(
-            item.data(0, Qt.ItemDataRole.UserRole + 1) is not None
-            for item in self.selectedItems()
-        )
-        original_flags = None
-        if target is not None and dragged_category:
-            original_flags = target.flags()
-            target.setFlags(original_flags & ~QtCore.Qt.ItemFlag.ItemIsDropEnabled)
-        try:
-            super().dropEvent(event)
-        finally:
-            if original_flags is not None:
-                target.setFlags(original_flags)
+        selected = self.selectedItems()
+        if len(selected) != 1:
+            event.ignore()
+            return
+
+        dragged = selected[0]
+        point = event.position().toPoint()
+        target = self.itemAt(point)
+        if target is dragged or (target is not None and dragged.isAncestorOf(target)):
+            event.ignore()
+            return
+
+        self._drop_y = point.y()
+        position = self.dropIndicatorPosition()
+        dragged_category = self._is_category(dragged)
+
+        if dragged_category:
+            # Categories are always root rows, even when dropped over a child.
+            anchor = target.parent() if target is not None and target.parent() else target
+            if anchor is None:
+                self._remove_item(dragged)
+                self.addTopLevelItem(dragged)
+            else:
+                self._insert_before_or_after(
+                    dragged,
+                    anchor,
+                    self._drop_is_after(anchor, position),
+                )
+        elif target is not None and self._is_category(target) and position == QtWidgets.QAbstractItemView.DropIndicatorPosition.OnItem:
+            # Dropping a snippet directly on a category assigns that category.
+            self._remove_item(dragged)
+            target.addChild(dragged)
+            target.setExpanded(True)
+        else:
+            # Dropping on a snippet reorders within its parent. Dropping on
+            # empty space makes the snippet an ungrouped root item.
+            if target is None:
+                self._remove_item(dragged)
+                self.addTopLevelItem(dragged)
+            else:
+                self._insert_before_or_after(
+                    dragged,
+                    target,
+                    self._drop_is_after(target, position),
+                )
+
         self.items_reordered.emit()
 
 
@@ -481,7 +557,17 @@ class PinnedTextDialog(QDialog):
         self._edit_entry({"source": "manual"}, source="manual")
 
     def _edit_entry(self, entry, source=None, index=None):
-        dialog = PinnedTextEditorDialog(self, entry, "Edit Pinned Text" if index is not None else "Add Pinned Text")
+        categories = []
+        for candidate in self.entries:
+            category = str(candidate.get("group") or "").strip()
+            if category and category not in categories:
+                categories.append(category)
+        dialog = PinnedTextEditorDialog(
+            self,
+            entry,
+            "Edit Pinned Text" if index is not None else "Add Pinned Text",
+            categories=categories,
+        )
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         text, label, group = dialog.values()
