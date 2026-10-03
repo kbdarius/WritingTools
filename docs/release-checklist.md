@@ -12,4 +12,6 @@ Use this before delivering a new build or release.
 8. Push the completed release to the GitHub `main` branch.
 9. Provide completion report: repo path, commit hash, version value, build status, and final exe filename.
 
+Verify the packaged application visibly opens Settings from both the tray menu and the popup's Manage pinned text command. The finalizer must launch this interactive app with normal window mode, not hidden window mode.
+
 If anything changes in the build flow, update `docs/build-and-release-windows.md` at the same time.

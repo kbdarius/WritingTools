@@ -89,6 +89,7 @@ What the script does:
 - Runs the existing PyInstaller build script.
 - Copies the finished executable into the repository root.
 - Stops any running `Writing Tools v*.exe` processes, including an already-running copy of the new version, deletes old versioned executables, and launches the release instance through the finalizer.
+- Launches the interactive application with normal Windows window mode. Do not use `-WindowStyle Hidden`: it can suppress Qt Settings windows even when the application reports them as visible.
 
 The old executable cleanup and new launch are enforced by:
 
@@ -139,6 +140,13 @@ Get-ChildItem .\Writing Tools v*.exe | Select-Object Name, Length, LastWriteTime
 ```
 
 ## 6. Update the release before tagging or publishing
+
+Before delivery, test the running packaged executable through both entry points:
+
+- Click **Settings** once in the tray menu and confirm the Settings window visibly opens.
+- Close Settings, open the Ctrl+Space popup, and click **Manage pinned text...** in its pinned-text menu. Confirm Settings visibly opens on the **Pinned Text** tab.
+
+Source-only tests and a successful `show()` log are insufficient for these checks: hidden Windows launch mode can leave Qt reporting visible windows that Windows never displays.
 
 Before you cut a release, make sure the version file reflects the new release number:
 

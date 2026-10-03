@@ -92,7 +92,9 @@ if ($existingNewProcesses.Count -gt 0) {
 
 Write-Host "Launching latest executable: $ExeName..."
 Write-Host "Starting $ExeName..."
-Start-Process -FilePath $newExePath -WorkingDirectory $resolvedRepoRoot -WindowStyle Hidden
+# This is an interactive desktop app. Hidden startup mode suppresses Qt's
+# normal windows even when Settings calls show(), raise_(), and activateWindow().
+Start-Process -FilePath $newExePath -WorkingDirectory $resolvedRepoRoot -WindowStyle Normal
 Start-Sleep -Seconds 4
 
 $newProcess = @(
