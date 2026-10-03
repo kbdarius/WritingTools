@@ -245,9 +245,33 @@ class PinnedTextEditorDialog(QDialog):
 class PinnedTextTreeWidget(QtWidgets.QTreeWidget):
     items_reordered = QtCore.Signal()
 
+    def startDrag(self, supported_actions):
+        selected = self.selectedItems()
+        if len(selected) != 1 or not supported_actions & Qt.DropAction.MoveAction:
+            return
+        mime_data = self.mimeData(selected)
+        if mime_data is None:
+            return
+        rect = self.visualItemRect(selected[0])
+        drag = QtGui.QDrag(self)
+        drag.setMimeData(mime_data)
+        drag.setPixmap(self.viewport().grab(rect))
+        drag.setHotSpot(self.viewport().mapFromGlobal(QtGui.QCursor.pos()) - rect.topLeft())
+        # dropEvent already moves the actual item. The base implementation
+        # would remove the current selection a second time after a MoveAction.
+        drag.exec(Qt.DropAction.MoveAction, Qt.DropAction.MoveAction)
+
     @staticmethod
     def _is_category(item):
         return item is not None and item.data(0, Qt.ItemDataRole.UserRole + 1) is not None
+
+    @staticmethod
+    def _is_ancestor(ancestor, item):
+        while item is not None:
+            item = item.parent()
+            if item is ancestor:
+                return True
+        return False
 
     def _remove_item(self, item):
         parent = item.parent()
@@ -284,7 +308,7 @@ class PinnedTextTreeWidget(QtWidgets.QTreeWidget):
         dragged = selected[0]
         point = event.position().toPoint()
         target = self.itemAt(point)
-        if target is dragged or (target is not None and dragged.isAncestorOf(target)):
+        if target is dragged or self._is_ancestor(dragged, target):
             event.ignore()
             return
 
@@ -322,6 +346,11 @@ class PinnedTextTreeWidget(QtWidgets.QTreeWidget):
                     self._drop_is_after(target, position),
                 )
 
+        self.setCurrentItem(dragged)
+        event.setDropAction(Qt.DropAction.MoveAction)
+        event.accept()
+        self.setState(QtWidgets.QAbstractItemView.State.NoState)
+        self.viewport().update()
         self.items_reordered.emit()
 
 
