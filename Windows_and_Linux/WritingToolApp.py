@@ -1394,6 +1394,11 @@ class WritingToolApp(QtWidgets.QApplication):
     def _restore_target_and_paste(self, text):
         """Return focus to the original app, then paste into its selection."""
         hwnd = self.target_window_handle
+        logging.debug(
+            'Preparing cursor paste for target window %s (text length %d)',
+            hwnd,
+            len(text),
+        )
         if sys.platform.startswith('win') and hwnd:
             try:
                 user32 = ctypes.windll.user32
@@ -1404,21 +1409,40 @@ class WritingToolApp(QtWidgets.QApplication):
                     if user32.IsIconic(hwnd):
                         user32.ShowWindow(hwnd, 9)  # SW_RESTORE
                     focused = user32.SetForegroundWindow(hwnd)
-                    logging.debug(f'Restored target window {hwnd}: {bool(focused)}')
+                    foreground = user32.GetForegroundWindow()
+                    logging.debug(
+                        'Restored target window %s: %s; current foreground: %s',
+                        hwnd,
+                        bool(focused),
+                        foreground,
+                    )
+                else:
+                    logging.warning('Cannot restore invalid target window %s', hwnd)
             except Exception as e:
                 logging.error(f'Could not restore target window: {e}')
 
-        # Windows applies foreground changes asynchronously. Waiting one
-        # short UI tick means Ctrl+V is delivered to the original input box,
-        # rather than to Writing Tools' just-closed result window.
-        QtCore.QTimer.singleShot(120, lambda: self._paste_text_at_cursor(text))
+        def paste_to_target():
+            if sys.platform.startswith('win') and hwnd:
+                try:
+                    foreground = ctypes.windll.user32.GetForegroundWindow()
+                    logging.debug(
+                        'Foreground window before Ctrl+V: %s; expected target: %s',
+                        foreground,
+                        hwnd,
+                    )
+                except Exception as e:
+                    logging.error(f'Could not inspect foreground window before paste: {e}')
+            self._paste_text_at_cursor(text)
+
+        QtCore.QTimer.singleShot(120, paste_to_target)
 
     @staticmethod
     def _paste_text_at_cursor(text):
         """Paste text while preserving the user's clipboard contents."""
         try:
             clipboard_backup = pyperclip.paste()
-            pyperclip.copy(text.rstrip('\n'))
+            paste_text = text.rstrip('\n')
+            pyperclip.copy(paste_text)
 
             keyboard = pykeyboard.Controller()
             keyboard.press(pykeyboard.Key.ctrl.value)
@@ -1426,8 +1450,21 @@ class WritingToolApp(QtWidgets.QApplication):
             keyboard.release('v')
             keyboard.release(pykeyboard.Key.ctrl.value)
 
-            time.sleep(0.2)
-            pyperclip.copy(clipboard_backup)
+            logging.debug('Sent Ctrl+V for cursor paste (text length %d)', len(paste_text))
+
+            def restore_clipboard():
+                try:
+                    if pyperclip.paste() == paste_text:
+                        pyperclip.copy(clipboard_backup)
+                        logging.debug('Restored clipboard after cursor paste')
+                    else:
+                        logging.debug(
+                            'Clipboard changed after cursor paste; leaving it untouched'
+                        )
+                except Exception as e:
+                    logging.error(f'Error restoring clipboard after cursor paste: {e}')
+
+            QtCore.QTimer.singleShot(1000, restore_clipboard)
         except Exception as e:
             logging.error(f'Error inserting text at cursor: {e}')
 
