@@ -217,6 +217,8 @@ These instructions are for any Writing Tools version, using the OpenAI-Compatibl
 
 [Instructions here!](https://github.com/theJayTea/WritingTools/blob/main/README's%20Linked%20Content/To%20Run%20Writing%20Tools%20Directly%20from%20the%20Source%20Code.md)
 
+On Windows, after setting up the repository's Python environment, you can double-click [Run Writing Tools (Source).bat](./Run%20Writing%20Tools%20(Source).bat) in the repository root. It runs the source code rather than the packaged executable; keep its console window open while the app is running.
+
 
 ## 👨‍💻 To Compile the Application Yourself:
 

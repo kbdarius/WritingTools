@@ -1559,6 +1559,7 @@ class CustomPopupWindow(QtWidgets.QWidget):
             menu.deleteLater()
 
     def paste_pinned_text(self, text):
+        self.hide()
         if hasattr(self.app, "_restore_target_and_paste"):
             self.app._restore_target_and_paste(text)
         else:

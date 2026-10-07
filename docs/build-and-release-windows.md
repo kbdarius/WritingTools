@@ -74,6 +74,8 @@ The build script names the output using that value. If you are preparing a new r
 
 ## 4. Build the Windows executable
 
+Before building, review `Run Writing Tools (Source).bat` in the repository root. Update it if a release changes the source path, Python environment, entry point, or runtime setup. The launcher is not version-specific, so a version bump alone does not require editing it. Run it once and confirm the app initializes its tray icon and global hotkey, then exit it before continuing so its hotkey does not conflict with the packaged release.
+
 From the repository root, run one of these:
 
 ```powershell
