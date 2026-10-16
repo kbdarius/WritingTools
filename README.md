@@ -109,11 +109,11 @@ To install it:
 #### 💎 Why the macOS port is special
 
 - **Truly native**: Built in Swift (SwiftUI + AppKit where needed) for a fast, polished Mac experience.
-- **Private & on-device**: Run **local LLMs with MLX** on Apple Silicon — no internet required for on-device models.
+- **Private & on-device**: Run **local LLMs with MLX** on Apple Silicon - no internet required for on-device models.
 - **Rich-text aware**: **Proofread preserves RTF formatting** (bold, italics, lists, links) so your documents keep their look while errors disappear.
 - **Your workflows, your way**: **Edit and add your own commands** and assign custom shortcuts.
 - **Multilingual by design**: App UI supports **English, German, French, and Spanish**, and commands work in many more languages.
-- **Choice of intelligence**: Connect to top providers or go fully local — switch any time.
+- **Choice of intelligence**: Connect to top providers or go fully local - switch any time.
 - **Themes**: Multiple themes (including dark mode) to match your desktop vibe.
 
 #### 🧠 Providers & Models on macOS
@@ -124,7 +124,7 @@ To install it:
 
 #### 🖱️ System-wide magic on macOS
 
-- Works across most Mac apps — select text, invoke Writing Tools, and instantly **Proofread**, **Rewrite**, **Change tone**, or **Summarize**.
+- Works across most Mac apps - select text, invoke Writing Tools, and instantly **Proofread**, **Rewrite**, **Change tone**, or **Summarize**.
 - Start a **quick chat** with your chosen model without selecting text.
 
 > **Tip:** If your shortcut clashes with Spotlight or Input Source switching, set a custom hotkey in Writing Tools **and/or** adjust macOS settings under  
@@ -171,9 +171,15 @@ I believe strongly in protecting your privacy. Writing Tools:
 - Does not collect or store any of your writing data by itself. It doesn't even collect general logs, so it's super light and privacy-friendly.
 - Lets you use local LLMs to process your text entirely on-device.
 - Only sends text to the chosen AI provider (encrypted) when you *explicitly* use one of the options.
-- Only stores your API key locally on your device.
+- Stores API keys locally on your device. GitHub Copilot uses the account already signed in to Copilot CLI; Writing Tools does not store a Copilot token.
 
 Note: If you choose to use a cloud based LLM, refer to the AI provider's privacy policy and terms of service.
+
+### GitHub Copilot for Windows/Linux
+
+Writing Tools can use the official GitHub Copilot SDK with your signed-in Copilot CLI account. Install and sign in to Copilot CLI first by running `copilot` in a terminal. Then select **GitHub Copilot** in Writing Tools Settings and use **Test writing AI connection** to check sign-in. The test checks authentication only and does not send a model request.
+
+When you use a writing action, the selected text and prompt are sent to GitHub Copilot using **GPT-5 mini** with **medium reasoning effort**. Requests use the signed-in account's Copilot usage allowance and remain subject to plan and organization policies. The model must be enabled and available to the Copilot CLI account. The SDK runtime downloads automatically on first use. See the [Copilot SDK sign-in guide](https://github.com/github/copilot-sdk/blob/main/docs/auth/authenticate.md) and [usage and billing details](https://docs.github.com/en/copilot/how-tos/copilot-sdk/features/usage-and-billing).
 
 ## ✨ Options Explained
 
@@ -211,7 +217,7 @@ These instructions are for any Writing Tools version, using the OpenAI-Compatibl
    
    To fix it, simply change the hotkey to **ctrl+`** or **ctrl+j** and restart Writing Tools. PS: If a hotkey is already in use by a program or background process, Writing Tools may not be able to intercept it. The above hotkeys are usually unused.
 
-2. The initial launch of the `Writing Tools.exe` might take unusually long — this seems to be because AV software extensively scans this new executable before letting it run. Once it launches into the background in RAM, it works instantly as usual.
+2. The initial launch of the `Writing Tools.exe` might take unusually long - this seems to be because AV software extensively scans this new executable before letting it run. Once it launches into the background in RAM, it works instantly as usual.
 
 ## 👨‍💻 To Run Writing Tools Directly from the Source Code
 
@@ -262,7 +268,7 @@ Helped add the start-on-boot setting!
 ### 🍎 macOS version:
 #### A native Swift port created entirely by **[Arya Mirsepasi](https://github.com/Aryamirsepasi)**! This was a big endeavour and he's done an increadble job.
 
-Over so many emails, @Aryamirsepasi has been someone I truly look up to, and it's rare to find people as kind as him. We're incredibly grateful for all his contributions here! — Jesai
+Over so many emails, @Aryamirsepasi has been someone I truly look up to, and it's rare to find people as kind as him. We're incredibly grateful for all his contributions here! - Jesai
 
 **1. [Joaov41](https://github.com/Joaov41):**
 

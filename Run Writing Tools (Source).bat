@@ -18,6 +18,12 @@ if not exist "%APP_DIR%\main.py" (
     goto :failed
 )
 
+"%PYTHON%" -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)"
+if errorlevel 1 (
+    echo Python 3.11 or later is required for the GitHub Copilot SDK.
+    goto :failed
+)
+
 if not exist "%RUNTIME_DIR%" mkdir "%RUNTIME_DIR%"
 if errorlevel 1 (
     echo Could not create the source runtime folder:

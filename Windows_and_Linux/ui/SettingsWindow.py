@@ -905,7 +905,7 @@ class SettingsWindow(QtWidgets.QWidget):
         if self.azure_usage_button is None:
             self.azure_usage_button = QtWidgets.QPushButton(_("↻  Check Azure usage"))
         self.azure_usage_button.setToolTip(
-            _("Read the official Synthesized Characters metric for this month.")
+            _("Read synthesized-character usage if Azure Monitor supports it for this resource.")
         )
         self.azure_usage_button.clicked.connect(self.check_azure_usage)
         self.azure_usage_button.setText(_("Check Azure usage"))
@@ -970,7 +970,9 @@ class SettingsWindow(QtWidgets.QWidget):
         self.provider_dropdown.setToolTip(
             _(
                 "Gemini is the simplest option for regular PCs. Azure OpenAI is for work or "
-                "restricted PCs. OpenAI Compatible is for advanced custom services."
+                "restricted PCs. OpenAI Compatible is for advanced custom services. "
+                "GitHub Copilot uses your signed-in Copilot CLI account with GPT-5 mini "
+                "at medium reasoning effort."
             )
         )
 

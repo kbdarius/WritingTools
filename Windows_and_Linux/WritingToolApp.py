@@ -20,6 +20,7 @@ import ui.SettingsWindow
 import ui.SpeechControlWindow
 from aiprovider import AzureOpenAIProvider, GeminiProvider, OllamaProvider, OpenAICompatibleProvider, obfuscate_api_key
 from azure_speech import AzureSpeechService, prepare_text_for_speech
+from github_copilot_provider import GitHubCopilotProvider
 from local_speech import LocalSpeechService
 from pynput import keyboard as pykeyboard
 from PySide6 import QtCore, QtGui, QtWidgets
@@ -150,7 +151,7 @@ class WritingToolApp(QtWidgets.QApplication):
         self.speech_progress_dialog = None
 
         # Holder for the user's selected text. Populated asynchronously by a
-        # background thread so the popup can show instantly — see `_show_popup`
+        # background thread so the popup can show instantly - see `_show_popup`
         # and `_fire_ctrl_c_and_capture_async`. The lock serializes Ctrl+C
         # captures across rapid hotkey presses so two captures don't fight
         # over the clipboard at once.
@@ -168,6 +169,7 @@ class WritingToolApp(QtWidgets.QApplication):
             GeminiProvider(self),
             AzureOpenAIProvider(self),
             OpenAICompatibleProvider(self),
+            GitHubCopilotProvider(self),
         ]
 
         if not self.config:
@@ -400,7 +402,7 @@ class WritingToolApp(QtWidgets.QApplication):
     def _migrate_config(self):
         """
         One-shot config migration. Catches any user up to the current schema
-        (v9) regardless of where they started — v7, v8, or already current —
+        (v9) regardless of where they started - v7, v8, or already current —
         in a single pass with at most one restart.
 
         Each version is gated on its own `is_config_file_updated_for_v{N}`
@@ -412,7 +414,7 @@ class WritingToolApp(QtWidgets.QApplication):
           • Google removed Gemini 2.0 from the free API → bump model.
           • Obfuscate plaintext Gemini API keys (defeats Ctrl+F scanning).
           The custom-model input field didn't exist pre-v8, so any pre-v8
-          model value is safe to overwrite — there's nothing custom to
+          model value is safe to overwrite - there's nothing custom to
           preserve.
 
         v9 (introduced 2026):
@@ -435,10 +437,10 @@ class WritingToolApp(QtWidgets.QApplication):
             'gemma-3-27b-it':           NEW_DEFAULT_MODEL,
             'gemma-3-4b-it':            NEW_DEFAULT_MODEL,
             'gemini-flash-lite-latest': NEW_DEFAULT_MODEL,
-            # 'gemini-flash-latest' itself is already current — no entry needed.
+            # 'gemini-flash-latest' itself is already current - no entry needed.
         }
 
-        # New user (no config yet) — onboarding will create a fresh, current
+        # New user (no config yet) - onboarding will create a fresh, current
         # config; nothing to migrate.
         if not self.config:
             logging.debug('No config to migrate (new user)')
@@ -471,7 +473,7 @@ class WritingToolApp(QtWidgets.QApplication):
                     logging.info(f'[v8] Bumped Gemini model "{old_model}" -> "{NEW_DEFAULT_MODEL}"')
                     config_changed = True
 
-                # Obfuscate the API key. The helper is idempotent — already-
+                # Obfuscate the API key. The helper is idempotent - already-
                 # obfuscated keys (with the `enc:` prefix) pass through
                 # unchanged.
                 api_key = gemini_config.get('api_key', '')
@@ -504,7 +506,7 @@ class WritingToolApp(QtWidgets.QApplication):
 
         # Single restart popup, regardless of how many versions we jumped.
         if config_changed:
-            # Use QMessageBox directly — signals aren't connected yet at this
+            # Use QMessageBox directly - signals aren't connected yet at this
             # point in __init__.
             QMessageBox.information(
                 None,
@@ -584,7 +586,7 @@ class WritingToolApp(QtWidgets.QApplication):
 
         On conflict between a button hotkey and the global shortcut (or
         between two button hotkeys), the first registration wins and the
-        later one is logged and skipped — the listener can't dispatch to
+        later one is logged and skipped - the listener can't dispatch to
         two callbacks for the same combination anyway.
         """
         if sys.platform.startswith('win'):
@@ -603,7 +605,7 @@ class WritingToolApp(QtWidgets.QApplication):
             self.registered_hotkey = orig_shortcut
             try:
                 global_parsed = self._to_pynput_hotkey(orig_shortcut)
-                # Validate by parsing — raises if malformed.
+                # Validate by parsing - raises if malformed.
                 pykeyboard.HotKey.parse(global_parsed)
 
                 def on_global_activate():
@@ -618,7 +620,7 @@ class WritingToolApp(QtWidgets.QApplication):
                 logging.error(f'Failed to parse global hotkey "{orig_shortcut}": {e}')
 
             # --- Per-button direct hotkeys ------------------------------------
-            # Custom is excluded — it needs a typed instruction from the user,
+            # Custom is excluded - it needs a typed instruction from the user,
             # so a "fire directly" hotkey doesn't make sense for it.
             if self.options:
                 for button_name, button_cfg in self.options.items():
@@ -841,7 +843,7 @@ class WritingToolApp(QtWidgets.QApplication):
     @Slot(str)
     def _fire_button_directly(self, button_name):
         """
-        Run a button's option without showing the popup — invoked by a
+        Run a button's option without showing the popup - invoked by a
         per-button direct hotkey. Mirrors the relevant parts of
         `_show_popup`: set up the async clipboard capture, then hand off
         to the worker thread (`process_option`) which waits on the holder
@@ -856,7 +858,7 @@ class WritingToolApp(QtWidgets.QApplication):
 
         # Sanity check: button must still exist in options. Could be stale
         # if options.json was edited externally between registration and
-        # fire — skip gracefully rather than crash.
+        # fire - skip gracefully rather than crash.
         if not self.options or button_name not in self.options:
             logging.warning(f'Button "{button_name}" no longer exists; ignoring hotkey')
             return
@@ -913,7 +915,7 @@ class WritingToolApp(QtWidgets.QApplication):
     def _show_popup(self):
         """
         Show the popup window the moment the hotkey fires, and capture the
-        user's selected text in parallel — popup display no longer waits on
+        user's selected text in parallel - popup display no longer waits on
         the clipboard. The old behaviour gated popup show on a 0.2-0.5s
         clipboard read, which on slower systems would time out and
         incorrectly fall back to the chat-only "Ask your AI" UI even when
@@ -925,7 +927,7 @@ class WritingToolApp(QtWidgets.QApplication):
 
         # Fresh holder per popup. Fire Ctrl+C *before* we create the popup
         # so the keystroke is queued while focus is still on the user's
-        # source app — the actual clipboard read happens in the background.
+        # source app - the actual clipboard read happens in the background.
         self.current_text_holder = _SelectedTextHolder()
         self._fire_ctrl_c_and_capture_async(self.current_text_holder)
 
@@ -981,7 +983,7 @@ class WritingToolApp(QtWidgets.QApplication):
         popup can display with no perceptible delay.
 
         Slow systems' clipboard subsystems can take a while to populate
-        after Ctrl+C — that's the whole reason this is async. The polling
+        after Ctrl+C - that's the whole reason this is async. The polling
         timeout is generous; an empty result after timeout means the user
         pressed the hotkey without actually selecting anything, which
         `process_option_thread` reports as a normal error.
@@ -1159,7 +1161,7 @@ class WritingToolApp(QtWidgets.QApplication):
         option_config = self.options.get(option, {})
         if not selected_text.strip():
             # The chat-mode fallback that used to fire here was removed when
-            # popup show became instant — we no longer have a way to detect
+            # popup show became instant - we no longer have a way to detect
             # "user wants to chat" vs "capture failed", so we pick the safer
             # interpretation and surface the error.
             if option_config.get('action') == 'read_aloud':

@@ -32,6 +32,9 @@ if not exist ".build-venv\Scripts\python.exe" (
 :build
 set "BUILD_PYTHON=%CD%\.build-venv\Scripts\python.exe"
 
+"%BUILD_PYTHON%" -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)"
+if errorlevel 1 goto :python_too_old
+
 echo [3/6] Cleaning previous build artifacts...
 REM Clean locked directories using PowerShell to handle antivirus/OneDrive locks
 if exist "build" (
@@ -72,6 +75,12 @@ exit /b 0
 echo.
 echo Python 3 was not found. Install it from https://www.python.org/downloads/windows/
 echo During installation, select "Add Python to PATH", then run this file again.
+exit /b 1
+
+:python_too_old
+echo.
+echo Python 3.11 or later is required for the GitHub Copilot SDK.
+echo If the build environment already exists, remove Windows_and_Linux\.build-venv and run this file again.
 exit /b 1
 
 :failed

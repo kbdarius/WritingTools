@@ -12,7 +12,7 @@ You can double-click `build-windows.bat` from the repository root and get a vers
 - Every release or code change must bump `APP_VERSION` before delivery.
 - Build artifacts must include the version in the filename.
 - Keep the repository on a permanent local path if you want to rebuild later without updating shortcuts or scripts.
-- The Windows build expects Python 3 to be available, ideally with `py -3` or `python` on `PATH`.
+- The Windows build requires Python 3.11 or later, ideally available as `py -3` or `python` on `PATH`. The GitHub Copilot SDK requires Python 3.11+.
 
 ## 1. Record the starting state
 
@@ -36,7 +36,7 @@ If `python` is not found, try:
 py -3 --version
 ```
 
-If both checks fail, install Python 3 first and make sure it is available from the command line.
+If both checks fail, install Python 3.11 or later and make sure it is available from the command line.
 
 ## 2. Clone or update the repository
 

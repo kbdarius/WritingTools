@@ -37,7 +37,7 @@ def run_pyinstaller_build():
         "--exclude-module", "IPython",
         "--exclude-module", "jedi",
         "--exclude-module", "email_validator",
-        # NOTE: do NOT exclude `cryptography` — google-genai's auth chain pulls
+        # NOTE: do NOT exclude `cryptography` - google-genai's auth chain pulls
         # it in heavily during `genai.Client()` construction. Excluding it
         # makes the compiled exe crash on startup.
         "--exclude-module", "psutil",
@@ -106,6 +106,8 @@ def run_pyinstaller_build():
         # package's JSON registry is data (not Python), so PyInstaller will
         # otherwise omit it and Read Aloud fails on the first click.
         "--collect-data", "language_tags",
+        "--collect-all", "copilot",
+        "--copy-metadata", "github-copilot-sdk",
         "main.py"
     ]
 

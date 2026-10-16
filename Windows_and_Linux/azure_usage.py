@@ -15,6 +15,7 @@ AZURE_POWERSHELL_INSTALL_URL = "https://learn.microsoft.com/en-us/powershell/azu
 AZURE_CLI_INSTALL_SCRIPT_URL = "https://aka.ms/installazurecliwindows"
 F0_MONTHLY_CHARACTERS = 500_000
 AZURE_INSTALL_TIMEOUT_SECONDS = 1800
+SYNTHESIZED_CHARACTERS_METRIC = "SynthesizedCharacters"
 
 
 def azure_cli_path() -> str | None:
@@ -182,12 +183,26 @@ def get_speech_usage(config: dict) -> dict[str, Any]:
     resource_id = resource["id"]
     now = datetime.now(timezone.utc)
     start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    metric = _run_cli(
-        cli, "monitor", "metrics", "list", "--resource", resource_id,
-        "--metric", "SynthesizedCharacters", "--aggregation", "Total", "--interval", "PT1H",
-        "--start-time", start.isoformat().replace("+00:00", "Z"),
-        "--end-time", now.isoformat().replace("+00:00", "Z"), "--output", "json",
-    )
+    try:
+        metric = _run_cli(
+            cli, "monitor", "metrics", "list", "--resource", resource_id,
+            "--metric", SYNTHESIZED_CHARACTERS_METRIC, "--aggregation", "Total", "--interval", "PT1H",
+            "--start-time", start.isoformat().replace("+00:00", "Z"),
+            "--end-time", now.isoformat().replace("+00:00", "Z"), "--output", "json",
+        )
+    except RuntimeError as exc:
+        details = str(exc).casefold()
+        if (
+            "failed to find metric configuration" in details
+            and SYNTHESIZED_CHARACTERS_METRIC.casefold() in details
+        ):
+            raise RuntimeError(
+                "Azure Monitor does not expose the SynthesizedCharacters metric for this "
+                "Speech resource. Speech playback is unaffected, but Writing Tools cannot "
+                "calculate monthly character totals or the F0 free-quota estimate. "
+                "Check Azure Cost Management for billing details."
+            ) from exc
+        raise
     points = []
     for series in (metric.get("value", [{}])[0].get("timeseries", []) or []):
         points.extend(series.get("data", []) or [])
