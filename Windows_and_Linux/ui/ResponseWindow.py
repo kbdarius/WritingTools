@@ -1,13 +1,12 @@
 import logging
 import os
-import sys
 
 import markdown2
 from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import Qt, Slot
 from PySide6.QtWidgets import QScrollArea
 
-from ui.UIUtils import UIUtils, colorMode
+from ui.UIUtils import UIUtils, colorMode, resource_path
 
 _ = lambda x: x
 
@@ -374,7 +373,7 @@ class ResponseWindow(QtWidgets.QWidget):
             
         for icon, tooltip, action in zoom_controls:
             btn = QtWidgets.QPushButton()
-            btn.setIcon(QtGui.QIcon(os.path.join(os.path.dirname(sys.argv[0]), 'icons', icon + ('_dark' if colorMode == 'dark' else '_light') + '.png')))
+            btn.setIcon(QtGui.QIcon(resource_path('icons', icon + ('_dark' if colorMode == 'dark' else '_light') + '.png')))
             btn.setStyleSheet(self.get_button_style())
             btn.setToolTip(tooltip)
             btn.clicked.connect(action)
@@ -401,8 +400,8 @@ class ResponseWindow(QtWidgets.QWidget):
         copy_bar.addStretch()
         
         copy_md_btn = QtWidgets.QToolButton()
-        copy_icon = os.path.join(
-            os.path.dirname(sys.argv[0]), 'icons',
+        copy_icon = resource_path(
+            'icons',
             'copy' + ('_dark' if colorMode == 'dark' else '_light') + '.png'
         )
         if os.path.exists(copy_icon):
@@ -424,8 +423,8 @@ class ResponseWindow(QtWidgets.QWidget):
         copy_bar.addWidget(read_aloud_btn)
 
         insert_btn = QtWidgets.QToolButton()
-        insert_icon = os.path.join(
-            os.path.dirname(sys.argv[0]), 'icons',
+        insert_icon = resource_path(
+            'icons',
             'send' + ('_dark' if colorMode == 'dark' else '_light') + '.png'
         )
         if os.path.exists(insert_icon):
@@ -492,7 +491,7 @@ class ResponseWindow(QtWidgets.QWidget):
         bottom_bar.addWidget(self.input_field)
         
         send_button = QtWidgets.QPushButton()
-        send_button.setIcon(QtGui.QIcon(os.path.join(os.path.dirname(sys.argv[0]), 'icons', 'send' + ('_dark' if colorMode == 'dark' else '_light') + '.png')))
+        send_button.setIcon(QtGui.QIcon(resource_path('icons', 'send' + ('_dark' if colorMode == 'dark' else '_light') + '.png')))
         send_button.setStyleSheet(f"""
             QPushButton {{
                 background-color: {'#2e7d32' if colorMode == 'dark' else '#4CAF50'};
@@ -505,6 +504,7 @@ class ResponseWindow(QtWidgets.QWidget):
             }}
         """)
         send_button.setFixedSize(self.input_field.sizeHint().height(), self.input_field.sizeHint().height())
+        send_button.setToolTip(_("Send follow-up question"))
         send_button.clicked.connect(self.send_message)
         bottom_bar.addWidget(send_button)
         
