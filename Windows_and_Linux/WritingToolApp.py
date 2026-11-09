@@ -29,6 +29,7 @@ from PySide6.QtGui import QCursor, QGuiApplication
 from PySide6.QtWidgets import QApplication, QMessageBox
 from update_checker import UpdateChecker
 from ui.UIUtils import resource_path
+from ui.window_visibility import ensure_native_window_visible
 from version import APP_DISPLAY_NAME, APP_VERSION
 from word_speech import WordSpeechService
 
@@ -1736,6 +1737,7 @@ class WritingToolApp(QtWidgets.QApplication):
 
             if settings_tab:
                 self.settings_window.select_tab(settings_tab)
+            ensure_native_window_visible(self.settings_window)
             self.settings_window.raise_()
             self.settings_window.activateWindow()
             logging.debug('Settings window shown successfully')
