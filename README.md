@@ -171,15 +171,19 @@ I believe strongly in protecting your privacy. Writing Tools:
 - Does not collect or store any of your writing data by itself. It doesn't even collect general logs, so it's super light and privacy-friendly.
 - Lets you use local LLMs to process your text entirely on-device.
 - Only sends text to the chosen AI provider (encrypted) when you *explicitly* use one of the options.
-- Stores API keys locally on your device. GitHub Copilot uses the account already signed in to Copilot CLI; Writing Tools does not store a Copilot token.
+- Stores API keys locally on your device. GitHub Copilot can use a selected GitHub CLI account or automatic Copilot sign-in; Writing Tools does not store a Copilot token.
 
 Note: If you choose to use a cloud based LLM, refer to the AI provider's privacy policy and terms of service.
 
 ### GitHub Copilot for Windows/Linux
 
-Writing Tools can use the official GitHub Copilot SDK with your signed-in Copilot CLI account. Install and sign in to Copilot CLI first by running `copilot` in a terminal. Then select **GitHub Copilot** in Writing Tools Settings and use **Test writing AI connection** to check sign-in. The test checks authentication only and does not send a model request.
+Select **GitHub Copilot** under Settings → AI Provider. **Scan account for available models** shows the account the SDK actually authenticated and its model catalog without sending a prompt. The account remains visible even if the model catalog is blocked by network policy.
 
-When you use a writing action, the selected text and prompt are sent to GitHub Copilot using **GPT-5 mini** with **medium reasoning effort**. Requests use the signed-in account's Copilot usage allowance and remain subject to plan and organization policies. The model must be enabled and available to the Copilot CLI account. The SDK runtime downloads automatically on first use. See the [Copilot SDK sign-in guide](https://github.com/github/copilot-sdk/blob/main/docs/auth/authenticate.md) and [usage and billing details](https://docs.github.com/en/copilot/how-tos/copilot-sdk/features/usage-and-billing).
+To choose between GitHub accounts, use **Sign in / add GitHub account…**, sign in through GitHub CLI (`gh auth login --hostname github.com --web`), then select the account and scan. The selected account is used explicitly for Writing Tools, without switching GitHub CLI's global active account. A blank account keeps automatic Copilot SDK authentication, which may use environment credentials, Copilot sign-in, or GitHub CLI credentials. The connection status identifies the effective account. Writing Tools saves only your account/model preferences and retrieves the selected account's token from GitHub CLI when needed.
+
+Choose a model from the scanned dropdown list or enter its ID. Existing settings default to **GPT-5 mini**, **medium** reasoning effort; leave effort blank for the model default. Use **Test writing AI connection** before writing: it sends a short synthetic prompt through the same account/model connection as a writing action, using your Copilot allowance. Saving changed connection settings also runs this test unless the same settings have already passed in the open Settings window. A catalog entry alone does not prove the model will accept requests. Unavailable models and unsupported efforts are reported without silently choosing another account or model.
+
+Writing actions send the selected text and prompt to the chosen GitHub Copilot model. Requests remain subject to the selected account's allowance, plan and organization policies. The SDK runtime downloads automatically on first use. See the [Copilot SDK sign-in guide](https://github.com/github/copilot-sdk/blob/main/docs/auth/authenticate.md) and [usage and billing details](https://docs.github.com/en/copilot/how-tos/copilot-sdk/features/usage-and-billing).
 
 ## ✨ Options Explained
 

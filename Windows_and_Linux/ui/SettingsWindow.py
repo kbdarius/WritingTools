@@ -20,6 +20,7 @@ from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QHBoxLayout, QRadioButton, QScrollArea
 
 from ui.AutostartManager import AutostartManager
+from ui.CopilotSetupWidget import CopilotSetupWidget
 from ui.CustomPopupWindow import (
     CustomPopupWindow,
     PinnedTextEditorDialog,
@@ -259,6 +260,9 @@ class SettingsWindow(QtWidgets.QWidget):
         self.save_button = None
         self.validation_label = None
         self._validation_in_progress = False
+        self._validation_apply_after = False
+        self._validated_provider_state = None
+        self.copilot_setup = None
         self._pending_provider = None
         self._pending_provider_config = None
         self._provider_drafts = {}
@@ -282,6 +286,7 @@ class SettingsWindow(QtWidgets.QWidget):
         """
         Initialize the user interface for the provider, including logo, name, description and all settings.
         """
+        self.copilot_setup = None
         if self.current_provider_layout:
             self.current_provider_layout.setParent(None)
             UIUtils.clear_layout(self.current_provider_layout)
@@ -389,9 +394,13 @@ class SettingsWindow(QtWidgets.QWidget):
         )
 
         # Add provider settings
-        for setting in provider.settings:
-            setting.set_value(provider_config.get(setting.name, setting.default_value))
-            setting.render_to_layout(self.current_provider_layout)
+        if provider.provider_name == "GitHub Copilot":
+            self.copilot_setup = CopilotSetupWidget(provider, provider_config, self)
+            self.current_provider_layout.addWidget(self.copilot_setup)
+        else:
+            for setting in provider.settings:
+                setting.set_value(provider_config.get(setting.name, setting.default_value))
+                setting.render_to_layout(self.current_provider_layout)
 
         layout.addLayout(self.current_provider_layout)
 
@@ -971,8 +980,7 @@ class SettingsWindow(QtWidgets.QWidget):
             _(
                 "Gemini is the simplest option for regular PCs. Azure OpenAI is for work or "
                 "restricted PCs. OpenAI Compatible is for advanced custom services. "
-                "GitHub Copilot uses your signed-in Copilot CLI account with GPT-5 mini "
-                "at medium reasoning effort."
+                "GitHub Copilot lets you choose a GitHub account and model, then test the connection."
             )
         )
 
@@ -1003,6 +1011,7 @@ class SettingsWindow(QtWidgets.QWidget):
         )
 
         test_button = QtWidgets.QPushButton(_("Test writing AI connection"))
+        self.provider_test_button = test_button
         test_button.setToolTip(_("Verify that the selected credentials can reach the selected model."))
         test_button.clicked.connect(self.test_provider_connection)
         content_layout.addWidget(test_button)
@@ -1387,8 +1396,13 @@ class SettingsWindow(QtWidgets.QWidget):
         self._validation_apply_after = apply_after
         self._pending_options = options
         self._pending_provider = provider
-        self._pending_provider_config = config
+        self._pending_provider_config = config.copy()
         self.save_button.setEnabled(False)
+        self.provider_dropdown.setEnabled(False)
+        self.provider_test_button.setEnabled(False)
+        if self.copilot_setup:
+            self.copilot_setup.invalidate_refresh()
+            self.copilot_setup.setEnabled(False)
         self.validation_label.setText(_("Testing connection to the selected model..."))
         self.validation_label.setStyleSheet(
             f"color: {'#ffffff' if colorMode == 'dark' else '#333333'}; font-size: 14px;"
@@ -1408,6 +1422,17 @@ class SettingsWindow(QtWidgets.QWidget):
     def _finish_provider_validation(self, success, message):
         self._validation_in_progress = False
         self.save_button.setEnabled(True)
+        self.provider_dropdown.setEnabled(True)
+        self.provider_test_button.setEnabled(True)
+        if self.copilot_setup:
+            self.copilot_setup.setEnabled(True)
+        tested_state = (self._pending_provider.provider_name, self._pending_provider_config)
+        if self._current_provider_state() != tested_state:
+            success = False
+            message = _("Settings changed during the test. Test the current connection before saving.")
+        self._validated_provider_state = tested_state if success else None
+        if self.copilot_setup:
+            self.copilot_setup.status.setText(message)
         self.validation_label.setText(message)
         self.validation_label.setStyleSheet(
             f"color: {'#63d471' if success else '#d93025'}; font-size: 14px; font-weight: bold;"
@@ -1430,7 +1455,9 @@ class SettingsWindow(QtWidgets.QWidget):
 
         provider = self.app.providers[self.provider_dropdown.currentIndex()]
         current_state = self._current_provider_state()
-        must_validate = self.providers_only or current_state != self._initial_provider_state
+        must_validate = (
+            self.providers_only or current_state != self._initial_provider_state
+        ) and current_state != self._validated_provider_state
         if must_validate:
             self._start_provider_validation(
                 provider,
@@ -1489,6 +1516,8 @@ class SettingsWindow(QtWidgets.QWidget):
 
     def closeEvent(self, event):
         """Handle window close event."""
+        # Closing Settings must not save a pending test's snapshot later.
+        self._validation_apply_after = False
         if self.providers_only:
             self.close_signal.emit()
         super().closeEvent(event)
